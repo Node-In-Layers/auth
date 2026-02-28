@@ -12,6 +12,7 @@
     "dist": "npm run build && cd dist && npm publish",
     "eslint": "eslint .",
     "prettier": "prettier --write .",
+    "prettier:check": "prettier --check .",
     "test": "mocha -r tsx ./test/src/*.test.ts ./test/src/**/*.test.ts ./test/src/**/**/*.test.ts",
     "test:coverage": "c8 --all --reporter cobertura --reporter text --reporter lcov --reporter html npm run test",
     "test:features": "NODE_OPTIONS='--import tsx' ./node_modules/.bin/cucumber-js"
