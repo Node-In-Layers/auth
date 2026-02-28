@@ -1,7 +1,7 @@
 # Node in Layers Auth - an Official Node in Layers Package
 
 ![Unit Tests](https://github.com/node-in-layers/auth/actions/workflows/ut.yml/badge.svg?branch=main)
-[![Coverage Status](https://coveralls.io/repos/github/Node-In-Layers/auth/badge.svg?branch=try-again)](https://coveralls.io/github/Node-In-Layers/auth?branch=try-again)
+[![Coverage Status](https://coveralls.io/repos/github/Node-In-Layers/auth/badge.svg?branch=try-again)](https://coveralls.io/github/Node-In-Layers/auth?branch=main)
 
 <img src="./public/nil.png" width="160" height="150" />
 
@@ -408,96 +408,6 @@ Helper functions exported by this package:
 ---
 
 # Unfinished Design Notes
-
-# Authentication Feature Implementations
-
-The primary implementation of the authentication happens with Json Web Tokens.
-When a user (or system user) successfully "logs in", they get a JWT and use that with subsequent requests.
-
-Then for each request, the JWT allows the authenticated user to call features/models.
-At this point the authorization process takes over.
-
-If using an OIDC type of flow with Auth0, Facebook, Google, etc, the frontend would make the request to the provider, get the provider's returned JWT, and then send it to the system's backend. The backend would validate this JWT via Json Web Keys (jwks) and then issue a system level JWT and return it back to the user for subsequent requests.
-
-Username/Passwords and API Keys ultimately work similar as well. First the caller makes a login request with these objects, it then goes through the authentication process, and returns a JWT to be used if successful.
-
-# AuthenticationConfig
-
-Authentication is configured in the config file of each of the parts of the system (backend/frontend).
-Multiple approaches can be provided and they can be ordered by which ones should be tried first.
-
-```typescript
-import { AuthNamespace } from '@node-in-layers/auth'
-
-type AuthenticationConfig = Readonly<{
-  [AuthNamespace.backend]: {
-    /**
-     * If you need better typing/schemas for the login feature that either restricts or expands the supported
-     * login approaches, put it here. This will be used instead of the default.
-     */
-    loginSchema?: ZodObject
-    /**
-     * This takes the form of "domain"."featureName"
-     * Example: "myDomain.myFeature"
-     */
-    approaches: readonly string[]
-  }
-}>
-
-// Example:
-const config = {
-  '@node-in-layers/auth/backend': {
-    loginSchema: z
-      .object({
-        customAuth: z
-          .object({
-            customKey: z.string(),
-          })
-          .describe('My custom auth schema'),
-      })
-      .describe('The authentication schema'),
-
-    approaches: [
-      '@node-in-layers/auth/backend.apiKeyAuth',
-      '@node-in-layers/auth/backend.oidcAuth',
-      '@node-in-layers/auth/backend.basicAuth',
-    ],
-  },
-}
-```
-
-## Included Authentication Approaches
-
-- Username/Password (Basic Auth)
-- OpenID Connect (OIDC)
-- Api Keys
-
-## Login
-
-The authentication backend domain (`AuthNamespace.backend`) has has the `login()` feature.
-This feature can allow a user/system to login to the system using the configured authorization approaches, and receive a JWT back for future requests.
-
-### Login Properties
-
-The login feature has dynamic properties based on the authentication approach on the backend. Having said that, the schema for the `annotatedFunction`
-can be changed in the configuration file, via the `loginSchema` property, so that consumers of this function can know exactly what the expected types are.
-By default, optional properties are used for all "known standard supported approaches", even if they are not explicitly configured.
-Having said that, the `loginSchema` can be explicitly set to the schemas exported by @node-in-layers/auth.
-
-```typescript
-type LoginProps = Readonly<{
-  oidcAuth?: {
-    token: string
-  }
-  apiKeyAuth?: {
-    key: string
-  }
-  basicAuth?: {
-    username: string
-    password: string
-  }
-}>
-```
 
 # Authorization Features Implementations
 
