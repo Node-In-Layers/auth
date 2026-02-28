@@ -1,7 +1,7 @@
 # Node in Layers Auth - an Official Node in Layers Package
 
 ![Unit Tests](https://github.com/node-in-layers/auth/actions/workflows/ut.yml/badge.svg?branch=main)
-[![Coverage Status](https://coveralls.io/repos/github/Node-In-Layers/auth/badge.svg?branch=try-again)](https://coveralls.io/github/Node-In-Layers/auth?branch=main)
+[![Coverage Status](https://coveralls.io/repos/github/Node-In-Layers/auth/badge.svg?branch=main)](https://coveralls.io/github/Node-In-Layers/auth?branch=main)
 
 <img src="./public/nil.png" width="160" height="150" />
 
