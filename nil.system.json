@@ -1,0 +1,5 @@
+{
+  "name": "@node-in-layers/auth",
+  "description": "Authentication done right for Node in Layers systems.",
+  "isPackage": true
+}

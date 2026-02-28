@@ -1,4 +1,5 @@
 dist/
+buildDocs/
 node_modules/
 __pycache__/
 package-lock.json

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "out": "./buildDocs",
+  "entryPoints": ["./src/index.ts"],
+  "highlightLanguages": ["typescript", "javascript", "json", "mermaid", "bash"]
+}
