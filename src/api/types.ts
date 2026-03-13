@@ -1,4 +1,5 @@
 import express from 'express'
+import type { AxiosInstance } from 'axios'
 import type { JsonObj } from 'functional-models'
 import type {
   LayerFunction,
@@ -11,7 +12,7 @@ import type {
 import { annotationFunctionProps } from '@node-in-layers/core'
 import type { Request, Response as ExpressResponse } from 'express'
 import { z } from 'zod'
-import { AuthNamespace } from '../types.js'
+import { AuthNamespace, type OidcUserLookupIdentifiers } from '../types.js'
 import { UserSchema } from '../core/types.js'
 import type {
   PolicyContext,
@@ -108,11 +109,22 @@ export type LoginApproach<T extends JsonObj = JsonObj> = LayerFunction<
  * @interface
  */
 export type ApiServices = Readonly<{
+  getPassthroughHttpClient: (crossLayerProps: CrossLayerProps) => AxiosInstance
   buildJwt: LayerFunction<(user: User) => SystemJwt>
   buildRefreshToken: LayerFunction<(user: User) => Promise<RefreshTokenResult>>
   cleanupRefreshTokens: LayerFunction<() => Promise<CleanupRefreshTokensResult>>
   refreshToken: LayerFunction<(refreshToken: string) => Promise<RefreshResult>>
   validateJwt: LayerFunction<(token: string) => Promise<User>>
+  verifyJwtWithJwks: LayerFunction<(token: string) => Promise<JsonObj>>
+  getOidcUserLookupIdentifiers: LayerFunction<
+    (payload: JsonObj) => OidcUserLookupIdentifiers
+  >
+  findUserByOidcIdentifiers: LayerFunction<
+    (identifiers: OidcUserLookupIdentifiers) => Promise<User | undefined>
+  >
+  provisionOidcPassthroughUser: LayerFunction<
+    (payload: JsonObj, identifiers: OidcUserLookupIdentifiers) => Promise<User>
+  >
   apiKeyAuthLogin: LoginApproach
   oidcAuthLogin: LoginApproach
   basicAuthLogin: LoginApproach
@@ -220,14 +232,17 @@ export const AuthenticatePropsSchema = z.object({
   token: z.string(),
 })
 
+export const AuthenticateReturnsSchema = z.union([UserSchema, z.undefined()])
+
 export const AuthenticateSchema = annotationFunctionProps<
   AuthenticateProps,
-  User
+  User | void
 >({
   functionName: 'authenticate',
   domain: AuthNamespace.Api,
   args: AuthenticatePropsSchema,
-  returns: UserSchema,
+  returns:
+    AuthenticateReturnsSchema as z.ZodType<User | void> as z.ZodType<User>,
 })
 
 export const RefreshFeaturePropsSchema = z.object({
@@ -272,7 +287,7 @@ export const CleanupRefreshTokensSchema = annotationFunctionProps<
  */
 export type ApiFeatures = Readonly<{
   login: NilAnnotatedFunction<LoginFeatureProps, LoginResult>
-  authenticate: NilAnnotatedFunction<AuthenticateProps, User>
+  authenticate: NilAnnotatedFunction<AuthenticateProps, User | void>
   refresh: NilAnnotatedFunction<RefreshFeatureProps, RefreshResult>
   cleanupRefreshTokens: NilAnnotatedFunction<
     JsonObj,

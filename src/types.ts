@@ -70,6 +70,16 @@ export enum LoginApproachServiceName {
 }
 
 /**
+ * How OAuth pass-through treats the incoming Bearer token.
+ * - **Jwks**: JWT verified against configured JWKS; user resolved or auto-provisioned.
+ * - **Opaque**: Any non-empty Bearer is accepted; no user is set (req.user stays unset).
+ */
+export enum OAuthPassthroughValidateMode {
+  Jwks = 'jwks',
+  Opaque = 'opaque',
+}
+
+/**
  * OIDC claims used to look up or match a local user (e.g. from an ID token).
  * @interface
  */
@@ -86,8 +96,22 @@ export type ApiConfig = Readonly<{
   authorization?: {
     skipAllAuthorization?: boolean
   }
-  // TODO: We need to migrate all the configurations for authentication to this object.
-  authentication?: object
+  authentication?: {
+    oauthPassthrough?: Readonly<{
+      enabled: boolean
+      validateMode?: OAuthPassthroughValidateMode
+      autoProvision?: boolean
+      /**
+       * JWT claim names for User fields when auto-provisioning (defaults: email, given_name, family_name, preferred_username).
+       */
+      claimMapping?: Readonly<{
+        email?: string
+        firstName?: string
+        lastName?: string
+        username?: string
+      }>
+    }>
+  }
   /**
    * Optional override schema for login request payload (`props.request`).
    * If not provided, the default auth login request schema is used.

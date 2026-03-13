@@ -1,8 +1,11 @@
 import { v4 as randomUUID } from 'uuid'
+import get from 'lodash/get.js'
+import axios from 'axios'
 import type {
   ModelCrudsFunctions,
   ServicesContext,
   ModelCrudsFactoryOverride,
+  CrossLayerProps,
 } from '@node-in-layers/core'
 import jwt from 'jsonwebtoken'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
@@ -33,6 +36,7 @@ import {
   requirePasswordHashSecretKey,
   verifyPasswordHash,
   type _JwtPayload,
+  getHeaders,
 } from './internal-libs.js'
 import type { ApiServices, LoginApproach } from './types.js'
 
@@ -279,6 +283,74 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     }
   }
 
+  const _claimString = (
+    payload: _JwtPayload,
+    claimName: string | undefined,
+    fallback: string
+  ): string => {
+    const v = claimName ? get(payload as object, claimName) : undefined
+    if (typeof v === 'string' && v.trim()) {
+      return v.trim()
+    }
+    return fallback
+  }
+
+  const _provisionUserFromOidcPayload = async (
+    payload: _JwtPayload,
+    identifiers: OidcUserLookupIdentifiers
+  ): Promise<User> => {
+    const bySub = identifiers.sub
+    const byIss = identifiers.iss
+    if (!bySub || !byIss) {
+      throw new Error('OAuth passthrough autoProvision requires sub and iss')
+    }
+    const map = apiConfig.authentication?.oauthPassthrough?.claimMapping ?? {}
+    const email = _normalizeIdentifier(
+      _claimString(
+        payload,
+        map.email ?? 'email',
+        `${bySub}@oauth-passthrough.local`
+      )
+    )
+    if (!email) {
+      throw new Error('OAuth passthrough could not resolve email')
+    }
+    const firstName = _claimString(
+      payload,
+      map.firstName ?? 'given_name',
+      'User'
+    )
+    const lastName = _claimString(
+      payload,
+      map.lastName ?? 'family_name',
+      'Passthrough'
+    )
+    const usernameRaw = map.username
+      ? get(payload as object, map.username)
+      : get(payload as object, 'preferred_username')
+    const username =
+      typeof usernameRaw === 'string' && usernameRaw.trim()
+        ? _normalizeIdentifier(usernameRaw.trim())
+        : undefined
+    const Users = getUserCruds<User>()
+    const userInstance = await Users.create<'id'>({
+      email,
+      username,
+      firstName,
+      lastName,
+      enabled: true,
+    })
+    const user = await userInstance.toObj<User>()
+    await UserAuthIdentities.create<'id'>({
+      userId: user.id,
+      iss: byIss,
+      sub: bySub,
+      email,
+      username: username ?? undefined,
+    }).save()
+    return user
+  }
+
   const _resolveEnabledUserFromIdentifiers = async (
     identifiers: OidcUserLookupIdentifiers
   ): Promise<User | undefined> => {
@@ -451,9 +523,34 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   }
 
   const validateJwt: ApiServices['validateJwt'] = async (token: string) => {
+    if (apiConfig.jwtSecret) {
+      const payload = await verifyWithSecret(token, apiConfig)
+      return getUserFromPayload(payload)
+    }
     const payload = await verifyTokenPayload(token, apiConfig)
     return getUserFromPayload(payload)
   }
+
+  const verifyJwtWithJwks: ApiServices['verifyJwtWithJwks'] = async (
+    token: string
+  ) => {
+    const payload = await verifyWithJwks(token, apiConfig)
+    return payload as unknown as JsonObj
+  }
+
+  const getOidcUserLookupIdentifiers: ApiServices['getOidcUserLookupIdentifiers'] =
+    (payload: JsonObj) =>
+      _parseOidcIdentifiers(payload as unknown as _JwtPayload)
+
+  const findUserByOidcIdentifiers: ApiServices['findUserByOidcIdentifiers'] =
+    _resolveEnabledUserFromIdentifiers
+
+  const provisionOidcPassthroughUser: ApiServices['provisionOidcPassthroughUser'] =
+    (payload, identifiers) =>
+      _provisionUserFromOidcPayload(
+        payload as unknown as _JwtPayload,
+        identifiers
+      )
 
   const apiKeyAuthLogin: LoginApproach = async ({ request }) => {
     const apiKeyRequest = (request as _LoginRequest).apiKeyAuth
@@ -500,8 +597,6 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     }
     return Promise.resolve()
       .then(async () => {
-        // Login flow should validate external provider tokens against provider JWKS.
-        // Local system-token validation remains in validateJwt().
         const payload = await verifyWithJwks(token, apiConfig)
         if (!_isJwtPayload(payload)) {
           return undefined
@@ -516,12 +611,27 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       })
   }
 
+  const getPassthroughHttpClient: ApiServices['getPassthroughHttpClient'] = (
+    crossLayerProps: CrossLayerProps
+  ) => {
+    const headers = getHeaders(crossLayerProps)
+    return axios.create({
+      insecureHTTPParser: true,
+      headers,
+    })
+  }
+
   return {
+    getPassthroughHttpClient,
     buildJwt,
     buildRefreshToken,
     cleanupRefreshTokens,
     refreshToken,
     validateJwt,
+    verifyJwtWithJwks,
+    getOidcUserLookupIdentifiers,
+    findUserByOidcIdentifiers,
+    provisionOidcPassthroughUser,
     apiKeyAuthLogin,
     oidcAuthLogin,
     basicAuthLogin,

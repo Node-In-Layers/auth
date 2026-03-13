@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { PrimaryKeyType } from 'functional-models'
 import {
+  type ErrorObject,
   FeaturesContext,
   createErrorObject,
   isErrorObject,
@@ -10,7 +11,13 @@ import {
   annotatedFunction,
   ModelCrudsFunctions,
 } from '@node-in-layers/core'
-import { AuthConfig, AuthNamespace } from '../types.js'
+import {
+  AuthConfig,
+  AuthNamespace,
+  OAuthPassthroughValidateMode,
+  type ApiConfig,
+  type Policy,
+} from '../types.js'
 import {
   LoginAttemptResult,
   PolicyEngineContext,
@@ -19,7 +26,6 @@ import {
   AuthCoreServicesLayer,
   PolicyContext,
 } from '../core/types.js'
-import { type Policy } from '../types.js'
 import { policyEngine } from '../core/libs/policy-engine.js'
 import { unpackAuthentication } from './internal-libs.js'
 import {
@@ -30,6 +36,7 @@ import {
   LoginFeatureProps,
   LoginResult,
   ApiFeatures,
+  AuthenticateProps,
   AuthenticateSchema,
   CleanupRefreshTokensSchema,
   LoginSchema,
@@ -197,15 +204,86 @@ export const create = (
     }
   )
 
-  const authenticate = annotatedFunction(
-    AuthenticateSchema,
-    (props, crossLayerProps) =>
-      Promise.resolve(
-        apiServices.validateJwt(props.token, crossLayerProps)
-      ).catch(err =>
-        createErrorObject('AUTH_FAILED', 'Failed to authenticate token', err)
+  const authenticate = annotatedFunction(AuthenticateSchema, ((
+    props,
+    crossLayerProps
+  ) => {
+    const log = context.log.getInnerLogger('authenticate', crossLayerProps)
+    const apiConfig = context.config[AuthNamespace.Api] as ApiConfig
+    const passthrough = apiConfig?.authentication?.oauthPassthrough
+
+    const tryLocalJwt = () =>
+      apiServices.validateJwt(props.token, crossLayerProps)
+
+    const authFailed = (err: ErrorObject | Error | undefined) =>
+      createErrorObject('AUTH_FAILED', 'Failed to authenticate token', err)
+
+    if (!passthrough?.enabled) {
+      return tryLocalJwt().catch(authFailed)
+    }
+
+    const mode = passthrough.validateMode ?? OAuthPassthroughValidateMode.Jwks
+
+    if (mode === OAuthPassthroughValidateMode.Opaque) {
+      return Promise.resolve(
+        typeof props.token === 'string' && props.token.trim().length > 0
+          ? undefined
+          : authFailed(
+              new Error('OAuth passthrough opaque requires non-empty token')
+            )
       )
-  )
+    }
+
+    if (mode === OAuthPassthroughValidateMode.Jwks) {
+      return apiServices
+        .verifyJwtWithJwks(props.token, crossLayerProps)
+        .then(payload => {
+          const identifiers = apiServices.getOidcUserLookupIdentifiers(
+            payload,
+            crossLayerProps
+          )
+          return apiServices
+            .findUserByOidcIdentifiers(identifiers, crossLayerProps)
+            .then(existing => {
+              if (existing) {
+                return existing
+              }
+              if (passthrough.autoProvision) {
+                return apiServices.provisionOidcPassthroughUser(
+                  payload,
+                  identifiers,
+                  crossLayerProps
+                )
+              }
+              const internalError = createErrorObject(
+                'AUTH_FAILED',
+                'OAuth passthrough: user not linked and autoProvision is false'
+              )
+              log.warn(
+                'OAuth passthrough: user not linked and autoProvision is false',
+                internalError
+              )
+              return authFailed(undefined)
+            })
+        })
+        .catch((jwksErr: unknown) =>
+          apiConfig.jwtSecret
+            ? tryLocalJwt().catch(() => Promise.reject(jwksErr))
+            : Promise.reject(jwksErr)
+        )
+        .catch(authFailed)
+    }
+
+    const internalError = createErrorObject(
+      'AUTH_FAILED',
+      'OAuth passthrough validateMode is not supported',
+      mode
+    )
+    log.warn('OAuth passthrough validateMode is not supported', internalError)
+    return Promise.resolve(authFailed(undefined))
+  }) as unknown as Parameters<
+    typeof annotatedFunction<AuthenticateProps, User>
+  >[1]) as ApiFeatures['authenticate']
 
   const refresh = annotatedFunction(RefreshSchema, (props, crossLayerProps) =>
     Promise.resolve().then(async () => {

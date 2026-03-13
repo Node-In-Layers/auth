@@ -1,4 +1,5 @@
 import { pbkdf2, randomBytes, timingSafeEqual } from 'node:crypto'
+import get from 'lodash/get.js'
 import { FeaturesContext, isErrorObject } from '@node-in-layers/core'
 import { JWTPayload } from 'jose'
 import { JsonAble, JsonObj } from 'functional-models'
@@ -69,14 +70,6 @@ const ensureApiLoaded = (context: FeaturesContext<AuthConfig>): void => {
       `Api auth domain "${AuthNamespace.Api}" not found in context.services. Likely not loaded.`
     )
   }
-  if (
-    typeof api.buildJwt !== 'function' ||
-    typeof api.validateJwt !== 'function'
-  ) {
-    throw new Error(
-      `Api "${AuthNamespace.Api}" must provide buildJwt and validateJwt.`
-    )
-  }
 }
 
 export const unpackAuthentication = (
@@ -84,7 +77,9 @@ export const unpackAuthentication = (
 ): _UnpackedAuth => {
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
 
-  if (!apiConfig?.loginApproaches?.length) {
+  const passthroughOnly =
+    apiConfig?.authentication?.oauthPassthrough?.enabled === true
+  if (!apiConfig?.loginApproaches?.length && !passthroughOnly) {
     throw new Error(
       `Auth api config not found or loginApproaches empty. Likely not included in config (${AuthNamespace.Api}).`
     )
@@ -92,9 +87,10 @@ export const unpackAuthentication = (
 
   ensureApiLoaded(context)
 
+  const approachIds = apiConfig.loginApproaches ?? []
   return {
     apiConfig,
-    loginApproaches: apiConfig.loginApproaches.map(id => ({
+    loginApproaches: approachIds.map(id => ({
       loginApproach: id,
       fn: getLoginApproachFn(context, id),
     })),
@@ -229,4 +225,16 @@ export const createMcpResponse = <T extends JsonAble>(
       },
     ],
   }
+}
+
+export const getHeaders = (crossLayerProps: any): Record<string, string> => {
+  const authorization =
+    get(crossLayerProps, 'requestInfo.headers.Authorization') ||
+    get(crossLayerProps, 'requestInfo.headers.authorization')
+  if (authorization) {
+    return {
+      Authorization: authorization as string,
+    }
+  }
+  return {}
 }

@@ -23,6 +23,10 @@ describe('/src/api/internal-libs.ts', () => {
           [AuthNamespace.Api]: {
             buildJwt: () => ({}),
             validateJwt: async () => ({}),
+            verifyJwtWithJwks: async () => ({}),
+            getOidcUserLookupIdentifiers: () => ({}),
+            findUserByOidcIdentifiers: async () => undefined,
+            provisionOidcPassthroughUser: async () => ({}),
           },
           getServices: () => undefined,
         },
@@ -31,25 +35,6 @@ describe('/src/api/internal-libs.ts', () => {
       assert.throws(() => {
         unpackAuthentication(context)
       }, /Auth api config not found or loginApproaches empty/)
-    })
-
-    it('should throw when auth api services are not loaded', () => {
-      const context = {
-        config: {
-          [AuthNamespace.Api]: {
-            loginApproaches: ['auth.login'],
-          },
-        },
-        services: {
-          // Missing buildJwt / validateJwt
-          [AuthNamespace.Api]: {},
-          getServices: () => undefined,
-        },
-      } as unknown as FeaturesContext<AuthConfig>
-
-      assert.throws(() => {
-        unpackAuthentication(context)
-      }, /Api ".*" must provide buildJwt and validateJwt\./)
     })
 
     it('should resolve login approaches from context.services', async () => {
@@ -62,6 +47,10 @@ describe('/src/api/internal-libs.ts', () => {
       services[AuthNamespace.Api] = {
         buildJwt: () => ({}),
         validateJwt: async () => ({}),
+        verifyJwtWithJwks: async () => ({}),
+        getOidcUserLookupIdentifiers: () => ({}),
+        findUserByOidcIdentifiers: async () => undefined,
+        provisionOidcPassthroughUser: async () => ({}),
       }
 
       services.getServices.withArgs('authDomain').returns({
@@ -99,6 +88,10 @@ describe('/src/api/internal-libs.ts', () => {
       services[AuthNamespace.Api] = {
         buildJwt: () => ({}),
         validateJwt: async () => ({}),
+        verifyJwtWithJwks: async () => ({}),
+        getOidcUserLookupIdentifiers: () => ({}),
+        findUserByOidcIdentifiers: async () => undefined,
+        provisionOidcPassthroughUser: async () => ({}),
       }
 
       const context = {
@@ -125,6 +118,10 @@ describe('/src/api/internal-libs.ts', () => {
       services[AuthNamespace.Api] = {
         buildJwt: () => ({}),
         validateJwt: async () => ({}),
+        verifyJwtWithJwks: async () => ({}),
+        getOidcUserLookupIdentifiers: () => ({}),
+        findUserByOidcIdentifiers: async () => undefined,
+        provisionOidcPassthroughUser: async () => ({}),
       }
 
       const context = {
