@@ -7,6 +7,7 @@ import type {
   ApiHost,
   ApiMcp,
   ApiProtectedRouteRegistration,
+  ApiServicesLayer,
 } from './types.js'
 import {
   DEFAULT_LOGIN_METHOD,
@@ -19,13 +20,15 @@ import {
   createLoginHandler,
   createRefreshHandler,
   normalizeMethod,
+  authorizationMiddleware,
 } from './internal-transport-libs.js'
+import { addUserToCrossLayerProps } from './libs.js'
 
 const MCP_NAMESPACE = '@node-in-layers/mcp-server'
 
 type _McpContext = FeaturesContext<
   Config,
-  object,
+  ApiServicesLayer,
   ApiFeaturesLayer,
   Readonly<{ mcp?: Readonly<Record<string, unknown>> }>
 >
@@ -112,28 +115,37 @@ export const create = (context: _McpContext): ApiMcp => {
     host.addPreRouteMiddleware(middleware)
   }
 
-  const loginHandler = createLoginHandler(
-    context.features[AuthNamespace.Api].login
-  )
-  const refreshHandler = createRefreshHandler(
-    context.features[AuthNamespace.Api].refresh
-  )
+  const oauthPassthrough = apiConfig?.authentication?.oauthPassthrough?.enabled
 
-  addUnprotectedRoute(
-    apiConfig?.loginPath || DEFAULT_LOGIN_PATH,
-    apiConfig?.loginMethod || DEFAULT_LOGIN_METHOD,
-    loginHandler
-  )
-  addUnprotectedRoute(
-    apiConfig?.refreshPath || DEFAULT_REFRESH_PATH,
-    apiConfig?.refreshMethod || DEFAULT_REFRESH_METHOD,
-    refreshHandler
-  )
-
-  addUnprotectedFeature(context.features[AuthNamespace.Api].login)
+  if (!oauthPassthrough) {
+    const loginHandler = createLoginHandler(
+      context.features[AuthNamespace.Api].login
+    )
+    const refreshHandler = createRefreshHandler(
+      context.features[AuthNamespace.Api].refresh
+    )
+    const authn = apiConfig?.authentication
+    addUnprotectedRoute(
+      authn?.loginPath || DEFAULT_LOGIN_PATH,
+      authn?.loginMethod || DEFAULT_LOGIN_METHOD,
+      loginHandler
+    )
+    addUnprotectedRoute(
+      authn?.refreshPath || DEFAULT_REFRESH_PATH,
+      authn?.refreshMethod || DEFAULT_REFRESH_METHOD,
+      refreshHandler
+    )
+    addUnprotectedFeature(context.features[AuthNamespace.Api].login)
+  }
   addProtectedFeature(context.features[AuthNamespace.Api].cleanupRefreshTokens)
-  if (!apiConfig?.skipAllAuthentication) {
+  if (!apiConfig?.authentication?.skipAllAuthentication) {
     addPreRouteMiddleware(_protectedMiddleware)
+  }
+
+  host.addCrossLayerPropMiddleware(addUserToCrossLayerProps)
+
+  if (!apiConfig?.authorization?.skipAllAuthorization) {
+    host.addPreRouteMiddleware(authorizationMiddleware(context))
   }
 
   return {

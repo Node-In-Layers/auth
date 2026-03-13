@@ -23,6 +23,10 @@ describe('/src/api/internal-libs.ts', () => {
           [AuthNamespace.Api]: {
             buildJwt: () => ({}),
             validateJwt: async () => ({}),
+            verifyJwtWithJwks: async () => ({}),
+            getOidcUserLookupIdentifiers: () => ({}),
+            findUserByOidcIdentifiers: async () => undefined,
+            provisionOidcPassthroughUser: async () => ({}),
           },
           getServices: () => undefined,
         },
@@ -31,25 +35,6 @@ describe('/src/api/internal-libs.ts', () => {
       assert.throws(() => {
         unpackAuthentication(context)
       }, /Auth api config not found or loginApproaches empty/)
-    })
-
-    it('should throw when auth api services are not loaded', () => {
-      const context = {
-        config: {
-          [AuthNamespace.Api]: {
-            loginApproaches: ['auth.login'],
-          },
-        },
-        services: {
-          // Missing buildJwt / validateJwt
-          [AuthNamespace.Api]: {},
-          getServices: () => undefined,
-        },
-      } as unknown as FeaturesContext<AuthConfig>
-
-      assert.throws(() => {
-        unpackAuthentication(context)
-      }, /Api ".*" must provide buildJwt and validateJwt\./)
     })
 
     it('should resolve login approaches from context.services', async () => {
@@ -62,6 +47,10 @@ describe('/src/api/internal-libs.ts', () => {
       services[AuthNamespace.Api] = {
         buildJwt: () => ({}),
         validateJwt: async () => ({}),
+        verifyJwtWithJwks: async () => ({}),
+        getOidcUserLookupIdentifiers: () => ({}),
+        findUserByOidcIdentifiers: async () => undefined,
+        provisionOidcPassthroughUser: async () => ({}),
       }
 
       services.getServices.withArgs('authDomain').returns({
@@ -69,7 +58,9 @@ describe('/src/api/internal-libs.ts', () => {
       })
 
       const apiConfig = {
-        loginApproaches: ['authDomain.login'],
+        authentication: {
+          loginApproaches: ['authDomain.login'],
+        },
       }
 
       const context = {
@@ -99,12 +90,18 @@ describe('/src/api/internal-libs.ts', () => {
       services[AuthNamespace.Api] = {
         buildJwt: () => ({}),
         validateJwt: async () => ({}),
+        verifyJwtWithJwks: async () => ({}),
+        getOidcUserLookupIdentifiers: () => ({}),
+        findUserByOidcIdentifiers: async () => undefined,
+        provisionOidcPassthroughUser: async () => ({}),
       }
 
       const context = {
         config: {
           [AuthNamespace.Api]: {
-            loginApproaches: ['missingDomain.login'],
+            authentication: {
+              loginApproaches: ['missingDomain.login'],
+            },
           },
         },
         services,
@@ -125,12 +122,18 @@ describe('/src/api/internal-libs.ts', () => {
       services[AuthNamespace.Api] = {
         buildJwt: () => ({}),
         validateJwt: async () => ({}),
+        verifyJwtWithJwks: async () => ({}),
+        getOidcUserLookupIdentifiers: () => ({}),
+        findUserByOidcIdentifiers: async () => undefined,
+        provisionOidcPassthroughUser: async () => ({}),
       }
 
       const context = {
         config: {
           [AuthNamespace.Api]: {
-            loginApproaches: ['authDomain.missingFn'],
+            authentication: {
+              loginApproaches: ['authDomain.missingFn'],
+            },
           },
         },
         services,
@@ -167,21 +170,22 @@ describe('/src/api/internal-libs.ts', () => {
 
   describe('#requirePasswordHashSecretKey()', () => {
     it('should return the configured secret key', () => {
-      const apiConfig = {
+      const authentication = {
+        loginApproaches: [] as string[],
         passwordHashSecretKey: 'secret-key',
       } as any
 
-      const actual = requirePasswordHashSecretKey(apiConfig)
+      const actual = requirePasswordHashSecretKey(authentication)
       const expected = 'secret-key'
 
       assert.equal(actual, expected)
     })
 
     it('should throw when secret key is not configured', () => {
-      const apiConfig = {} as any
+      const authentication = { loginApproaches: [] as string[] } as any
 
       assert.throws(() => {
-        requirePasswordHashSecretKey(apiConfig)
+        requirePasswordHashSecretKey(authentication)
       }, /passwordHashSecretKey is required/)
     })
   })

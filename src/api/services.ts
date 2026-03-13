@@ -1,5 +1,12 @@
 import { v4 as randomUUID } from 'uuid'
-import type { ModelCrudsFunctions, ServicesContext } from '@node-in-layers/core'
+import get from 'lodash/get.js'
+import axios from 'axios'
+import type {
+  ModelCrudsFunctions,
+  ServicesContext,
+  ModelCrudsFactoryOverride,
+  CrossLayerProps,
+} from '@node-in-layers/core'
 import jwt from 'jsonwebtoken'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import { getModel } from '@node-in-layers/core'
@@ -14,6 +21,7 @@ import {
 import {
   AuthConfig,
   AuthNamespace,
+  type ApiAuthenticationConfig,
   type ApiConfig,
   type OidcUserLookupIdentifiers,
 } from '../types.js'
@@ -29,6 +37,7 @@ import {
   requirePasswordHashSecretKey,
   verifyPasswordHash,
   type _JwtPayload,
+  getHeaders,
 } from './internal-libs.js'
 import type { ApiServices, LoginApproach } from './types.js'
 
@@ -82,31 +91,31 @@ const _normalizeOpaqueIdentifier = (value?: string): string | undefined => {
 
 const verifyWithSecret = async (
   token: string,
-  apiConfig: ApiConfig
+  authentication: ApiAuthenticationConfig
 ): Promise<_JwtPayload> => {
-  const jwtSecret = apiConfig.jwtSecret
+  const jwtSecret = authentication.jwtSecret
   if (!jwtSecret) {
     throw new Error('jwtSecret is required when verifying with secret')
   }
   const verified = jwt.verify(token, jwtSecret, {
-    issuer: apiConfig.jwtIssuer,
-    audience: apiConfig.jwtAudience,
-    algorithms: apiConfig.jwtAlgorithms as jwt.Algorithm[] | undefined,
+    issuer: authentication.jwtIssuer,
+    audience: authentication.jwtAudience,
+    algorithms: authentication.jwtAlgorithms as jwt.Algorithm[] | undefined,
   }) as _JwtPayload
   return verified
 }
 
 const verifyWithJwks = async (
   token: string,
-  apiConfig: ApiConfig
+  authentication: ApiAuthenticationConfig
 ): Promise<_JwtPayload> => {
-  const jwksUris = apiConfig.jwksUris ?? []
+  const jwksUris = authentication.jwksUris ?? []
   if (!jwksUris.length) {
     throw new Error('jwksUris is required when validating jwt via jwks')
   }
   const options = {
-    issuer: apiConfig.jwtIssuer,
-    audience: apiConfig.jwtAudience,
+    issuer: authentication.jwtIssuer,
+    audience: authentication.jwtAudience,
   }
   const jwkSets = jwksUris.map(uri => createRemoteJWKSet(new URL(uri)))
   const failed = new Error('could not validate token with configured jwksUris')
@@ -127,16 +136,16 @@ const verifyWithJwks = async (
 
 const verifyTokenPayload = async (
   token: string,
-  apiConfig: ApiConfig
+  authentication: ApiAuthenticationConfig
 ): Promise<_JwtPayload> => {
-  if (apiConfig.jwtSecret) {
-    return verifyWithSecret(token, apiConfig)
+  if (authentication.jwtSecret) {
+    return verifyWithSecret(token, authentication)
   }
-  return verifyWithJwks(token, apiConfig)
+  return verifyWithJwks(token, authentication)
 }
 
-const getRefreshTokenSettings = (apiConfig: ApiConfig) => {
-  const config = apiConfig.refreshTokens
+const getRefreshTokenSettings = (authentication: ApiAuthenticationConfig) => {
+  const config = authentication.refreshTokens
   const ttlDays =
     config?.ttlDays && config.ttlDays > 0
       ? config.ttlDays
@@ -162,14 +171,17 @@ const getRefreshTokenSettings = (apiConfig: ApiConfig) => {
 }
 
 export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
-  const apiConfig = context.config[AuthNamespace.Api]
+  const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
   const coreConfig = context.config[AuthNamespace.Core]
-  if (!apiConfig) {
-    throw new Error(`${AuthNamespace.Api} configuration not found`)
+  if (!apiConfig?.authentication) {
+    throw new Error(
+      `${AuthNamespace.Api}.authentication configuration not found`
+    )
   }
   if (!coreConfig) {
     throw new Error(`${AuthNamespace.Core} configuration not found`)
   }
+  const auth = apiConfig.authentication
 
   const UserAuthIdentities = getModel<UserAuthIdentity>(
     context,
@@ -186,7 +198,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   const refreshTokenPrimaryKeyName =
     RefreshTokens.getModelDefinition().primaryKeyName
   const passwordHashSecretKey = coreConfig.allowPasswordAuthentication
-    ? requirePasswordHashSecretKey(apiConfig)
+    ? requirePasswordHashSecretKey(auth)
     : undefined
 
   const getUserCruds = <
@@ -244,7 +256,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     identifier: string
   ): Promise<User | undefined> => {
     const Users = getUserCruds<User>()
-    const configured = apiConfig.basicAuthIdentifiers
+    const configured = auth.basicAuthIdentifiers
     const keys: ReadonlyArray<'email' | 'username'> =
       configured && configured.length ? configured : ['email', 'username']
     if (!keys.length) {
@@ -263,8 +275,8 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   const _parseOidcIdentifiers = (
     payload: _JwtPayload
   ): OidcUserLookupIdentifiers => {
-    const parsed = apiConfig.parseOidcPayloadIdentifiers
-      ? apiConfig.parseOidcPayloadIdentifiers(payload as unknown as JsonObj)
+    const parsed = auth.parseOidcPayloadIdentifiers
+      ? auth.parseOidcPayloadIdentifiers(payload as unknown as JsonObj)
       : {
           sub: typeof payload.sub === 'string' ? payload.sub : undefined,
           iss: typeof payload.iss === 'string' ? payload.iss : undefined,
@@ -273,6 +285,74 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       sub: _normalizeOpaqueIdentifier(parsed.sub),
       iss: _normalizeIdentifier(parsed.iss),
     }
+  }
+
+  const _claimString = (
+    payload: _JwtPayload,
+    claimName: string | undefined,
+    fallback: string
+  ): string => {
+    const v = claimName ? get(payload as object, claimName) : undefined
+    if (typeof v === 'string' && v.trim()) {
+      return v.trim()
+    }
+    return fallback
+  }
+
+  const _provisionUserFromOidcPayload = async (
+    payload: _JwtPayload,
+    identifiers: OidcUserLookupIdentifiers
+  ): Promise<User> => {
+    const bySub = identifiers.sub
+    const byIss = identifiers.iss
+    if (!bySub || !byIss) {
+      throw new Error('OAuth passthrough autoProvision requires sub and iss')
+    }
+    const map = auth.oauthPassthrough?.claimMapping ?? {}
+    const email = _normalizeIdentifier(
+      _claimString(
+        payload,
+        map.email ?? 'email',
+        `${bySub}@oauth-passthrough.local`
+      )
+    )
+    if (!email) {
+      throw new Error('OAuth passthrough could not resolve email')
+    }
+    const firstName = _claimString(
+      payload,
+      map.firstName ?? 'given_name',
+      'User'
+    )
+    const lastName = _claimString(
+      payload,
+      map.lastName ?? 'family_name',
+      'Passthrough'
+    )
+    const usernameRaw = map.username
+      ? get(payload as object, map.username)
+      : get(payload as object, 'preferred_username')
+    const username =
+      typeof usernameRaw === 'string' && usernameRaw.trim()
+        ? _normalizeIdentifier(usernameRaw.trim())
+        : undefined
+    const Users = getUserCruds<User>()
+    const userInstance = await Users.create<'id'>({
+      email,
+      username,
+      firstName,
+      lastName,
+      enabled: true,
+    })
+    const user = await userInstance.toObj<User>()
+    await UserAuthIdentities.create<'id'>({
+      userId: user.id,
+      iss: byIss,
+      sub: bySub,
+      email,
+      username: username ?? undefined,
+    }).save()
+    return user
   }
 
   const _resolveEnabledUserFromIdentifiers = async (
@@ -337,25 +417,25 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   }
 
   const buildJwt: ApiServices['buildJwt'] = (user: User) => {
-    const jwtSecret = apiConfig.jwtSecret
+    const jwtSecret = auth.jwtSecret
     if (!jwtSecret) {
       throw new Error('auth api jwtSecret is required to build jwt')
     }
-    if (!apiConfig.jwtIssuer) {
+    if (!auth.jwtIssuer) {
       throw new Error('auth api jwtIssuer is required to build jwt')
     }
-    if (!apiConfig.jwtAudience) {
+    if (!auth.jwtAudience) {
       throw new Error('auth api jwtAudience is required to build jwt')
     }
-    if (!apiConfig.jwtExpiresInSeconds) {
+    if (!auth.jwtExpiresInSeconds) {
       throw new Error('auth api jwtExpiresInSeconds is required to build jwt')
     }
     const token = jwt.sign({ user }, jwtSecret, {
-      issuer: apiConfig.jwtIssuer,
-      audience: apiConfig.jwtAudience,
-      expiresIn: apiConfig.jwtExpiresInSeconds,
+      issuer: auth.jwtIssuer,
+      audience: auth.jwtAudience,
+      expiresIn: auth.jwtExpiresInSeconds,
       algorithm:
-        (apiConfig.jwtAlgorithms?.[0] as jwt.Algorithm | undefined) ?? 'HS256',
+        (auth.jwtAlgorithms?.[0] as jwt.Algorithm | undefined) ?? 'HS256',
     })
     return { token }
   }
@@ -364,7 +444,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     user: User
   ) => {
     const token = randomUUID()
-    const refreshTokenSettings = getRefreshTokenSettings(apiConfig)
+    const refreshTokenSettings = getRefreshTokenSettings(auth)
     const ttlSeconds =
       refreshTokenSettings.ttlDays *
       HOURS_PER_DAY *
@@ -384,7 +464,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
 
   const cleanupRefreshTokens: ApiServices['cleanupRefreshTokens'] =
     async () => {
-      const refreshTokenSettings = getRefreshTokenSettings(apiConfig)
+      const refreshTokenSettings = getRefreshTokenSettings(auth)
       const cleanUpBefore = new Date(
         _nowMillis() -
           refreshTokenSettings.ttlDays *
@@ -447,9 +527,34 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   }
 
   const validateJwt: ApiServices['validateJwt'] = async (token: string) => {
-    const payload = await verifyTokenPayload(token, apiConfig)
+    if (auth.jwtSecret) {
+      const payload = await verifyWithSecret(token, auth)
+      return getUserFromPayload(payload)
+    }
+    const payload = await verifyTokenPayload(token, auth)
     return getUserFromPayload(payload)
   }
+
+  const verifyJwtWithJwks: ApiServices['verifyJwtWithJwks'] = async (
+    token: string
+  ) => {
+    const payload = await verifyWithJwks(token, auth)
+    return payload as unknown as JsonObj
+  }
+
+  const getOidcUserLookupIdentifiers: ApiServices['getOidcUserLookupIdentifiers'] =
+    (payload: JsonObj) =>
+      _parseOidcIdentifiers(payload as unknown as _JwtPayload)
+
+  const findUserByOidcIdentifiers: ApiServices['findUserByOidcIdentifiers'] =
+    _resolveEnabledUserFromIdentifiers
+
+  const provisionOidcPassthroughUser: ApiServices['provisionOidcPassthroughUser'] =
+    (payload, identifiers) =>
+      _provisionUserFromOidcPayload(
+        payload as unknown as _JwtPayload,
+        identifiers
+      )
 
   const apiKeyAuthLogin: LoginApproach = async ({ request }) => {
     const apiKeyRequest = (request as _LoginRequest).apiKeyAuth
@@ -496,9 +601,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     }
     return Promise.resolve()
       .then(async () => {
-        // Login flow should validate external provider tokens against provider JWKS.
-        // Local system-token validation remains in validateJwt().
-        const payload = await verifyWithJwks(token, apiConfig)
+        const payload = await verifyWithJwks(token, auth)
         if (!_isJwtPayload(payload)) {
           return undefined
         }
@@ -512,15 +615,34 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       })
   }
 
+  const getPassthroughHttpClient: ApiServices['getPassthroughHttpClient'] = (
+    crossLayerProps: CrossLayerProps
+  ) => {
+    const headers = getHeaders(crossLayerProps)
+    return axios.create({
+      insecureHTTPParser: true,
+      headers,
+    })
+  }
+
   return {
+    getPassthroughHttpClient,
     buildJwt,
     buildRefreshToken,
     cleanupRefreshTokens,
     refreshToken,
     validateJwt,
+    verifyJwtWithJwks,
+    getOidcUserLookupIdentifiers,
+    findUserByOidcIdentifiers,
+    provisionOidcPassthroughUser,
     apiKeyAuthLogin,
     oidcAuthLogin,
     basicAuthLogin,
     getUserCruds,
   }
+}
+
+export const authModelCrudsOverrides = (): ModelCrudsFactoryOverride[] => {
+  return []
 }

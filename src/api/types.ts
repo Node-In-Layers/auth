@@ -1,17 +1,24 @@
+import express from 'express'
+import type { AxiosInstance } from 'axios'
 import type { JsonObj } from 'functional-models'
 import type {
   LayerFunction,
   ModelCrudsFunctions,
   NilAnnotatedFunction,
-  Response,
   XOR,
+  Response,
+  CrossLayerProps,
 } from '@node-in-layers/core'
 import { annotationFunctionProps } from '@node-in-layers/core'
 import type { Request, Response as ExpressResponse } from 'express'
 import { z } from 'zod'
-import { AuthNamespace } from '../types.js'
+import { AuthNamespace, type OidcUserLookupIdentifiers } from '../types.js'
 import { UserSchema } from '../core/types.js'
-import type { User } from '../core/types.js'
+import type {
+  PolicyContext,
+  PolicyEvaluationResponse,
+  User,
+} from '../core/types.js'
 
 /**
  * Reference to a custom user model in the form domain.PluralModelName.
@@ -102,11 +109,22 @@ export type LoginApproach<T extends JsonObj = JsonObj> = LayerFunction<
  * @interface
  */
 export type ApiServices = Readonly<{
+  getPassthroughHttpClient: (crossLayerProps: CrossLayerProps) => AxiosInstance
   buildJwt: LayerFunction<(user: User) => SystemJwt>
   buildRefreshToken: LayerFunction<(user: User) => Promise<RefreshTokenResult>>
   cleanupRefreshTokens: LayerFunction<() => Promise<CleanupRefreshTokensResult>>
   refreshToken: LayerFunction<(refreshToken: string) => Promise<RefreshResult>>
   validateJwt: LayerFunction<(token: string) => Promise<User>>
+  verifyJwtWithJwks: LayerFunction<(token: string) => Promise<JsonObj>>
+  getOidcUserLookupIdentifiers: LayerFunction<
+    (payload: JsonObj) => OidcUserLookupIdentifiers
+  >
+  findUserByOidcIdentifiers: LayerFunction<
+    (identifiers: OidcUserLookupIdentifiers) => Promise<User | undefined>
+  >
+  provisionOidcPassthroughUser: LayerFunction<
+    (payload: JsonObj, identifiers: OidcUserLookupIdentifiers) => Promise<User>
+  >
   apiKeyAuthLogin: LoginApproach
   oidcAuthLogin: LoginApproach
   basicAuthLogin: LoginApproach
@@ -115,7 +133,9 @@ export type ApiServices = Readonly<{
    * need the ability to get the correct user object.
    * @returns The CRUDS functions for the user model.
    */
-  getUserCruds: <TUser extends User = User>() => ModelCrudsFunctions<TUser>
+  getUserCruds: <TUser extends User = User>(
+    crossLayerProps?: CrossLayerProps
+  ) => ModelCrudsFunctions<TUser>
 }>
 
 /** Layer shape exposing API auth services under the auth API namespace. */
@@ -212,14 +232,17 @@ export const AuthenticatePropsSchema = z.object({
   token: z.string(),
 })
 
+export const AuthenticateReturnsSchema = z.union([UserSchema, z.undefined()])
+
 export const AuthenticateSchema = annotationFunctionProps<
   AuthenticateProps,
-  User
+  User | void
 >({
   functionName: 'authenticate',
   domain: AuthNamespace.Api,
   args: AuthenticatePropsSchema,
-  returns: UserSchema,
+  returns:
+    AuthenticateReturnsSchema as z.ZodType<User | void> as z.ZodType<User>,
 })
 
 export const RefreshFeaturePropsSchema = z.object({
@@ -264,11 +287,14 @@ export const CleanupRefreshTokensSchema = annotationFunctionProps<
  */
 export type ApiFeatures = Readonly<{
   login: NilAnnotatedFunction<LoginFeatureProps, LoginResult>
-  authenticate: NilAnnotatedFunction<AuthenticateProps, User>
+  authenticate: NilAnnotatedFunction<AuthenticateProps, User | void>
   refresh: NilAnnotatedFunction<RefreshFeatureProps, RefreshResult>
   cleanupRefreshTokens: NilAnnotatedFunction<
     JsonObj,
     CleanupRefreshTokensResult
+  >
+  authorize: LayerFunction<
+    (props: PolicyContext) => Promise<Response<PolicyEvaluationResponse>>
   >
 }>
 
@@ -313,6 +339,12 @@ export type ApiProtectedRouteRegistration = Readonly<{
   handler?: ApiRouteHandler
 }>
 
+type _CrossLayerPropMiddleware = (
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => Promise<Record<string, any> | void>
+
 /**
  * Host interface for registering annotated functions, middleware, and additional routes.
  * @interface
@@ -322,6 +354,7 @@ export type ApiHost = Readonly<{
     annotatedFunction: NilAnnotatedFunction<TIn, TOut>,
     options?: object
   ) => void
+  addCrossLayerPropMiddleware: (middleware: _CrossLayerPropMiddleware) => void
   addPreRouteMiddleware: (middleware: ApiMiddleware) => void
   addAdditionalRoute: (route: ApiAdditionalRoute) => void
 }>

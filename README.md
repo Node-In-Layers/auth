@@ -17,6 +17,10 @@ This package contains common authentication and authorization types, models and 
 - Control who can access a feature
 - Control who can access a model, any specific method on that model, and even the individual rows themselves.
 
+## OAuth pass-through
+
+When pass-through is enabled, clients send an upstream Bearer (e.g. OIDC access or ID token). The API can validate it via JWKS, resolve an existing user by `iss` + `sub`, or **auto-provision** a local user and `UserAuthIdentity` on first sight if `autoProvision` is on. **`getPassthroughHttpClient`** (on API services) builds an HTTP client that forwards the same `Authorization` header from the incoming request—useful for proxying to upstream tools or APIs without swapping credentials.
+
 ## QUICK: How To Use
 
 ```bash
@@ -31,21 +35,31 @@ import { CoreNamespace } from '@node-in-layers/core'
 import { DataNamespace } from '@node-in-layers/data'
 import { AuthNamespace, LoginApproachServiceName } from '@node-in-layers/auth'
 
+// Only needed for API.
+import { authModelCrudsOverrides } from '@node-in-layers/auth/api/index.js'
+
 const config = {
   [CoreNamespace.root]: {
     apps: [
       await import('@node-in-layers/data/index.js'),
 
       // Add "Transport" Layer (rest-api or mcp-server)
-      await import('@node-in-layers/rest-api/index.js'),
-      //await import('@node-in-layers/mcp-server/index.js'),
+      await import('@node-in-layers/mcp-server/index.js'),
+      //await import('@node-in-layers/rest-api/index.js'),
 
+      // ALWAYS needed. (Front or backend)
       await import('@node-in-layers/auth/core/index.js'), // core models + core services/features
+
+      // Only needed on a backend/api
       await import('@node-in-layers/auth/api/index.js'), // login/authenticate + transport auth wiring
     ],
     layerOrder: ['services', 'features', 'express'], // or ['services', 'features', 'mcp']
     modelFactory: '@node-in-layers/data',
     modelCruds: true,
+
+    // FOR API/BACKENDS ONLY:
+    // AUTHORIZATION: Add this as a drop-in replacement to the default cruds factory.
+    modelCrudsFactory: authModelCrudsOverrides(),
   },
   // ...
   // Core Configurations
@@ -56,30 +70,42 @@ const config = {
 
   // API Configurations (ONLY for backend APIS)
   [AuthNamespace.Api]: {
-    // Select 1 or more login approaches.
-    loginApproaches: [
-      LoginApproachServiceName.ApiKeyAuthLogin,
-      LoginApproachServiceName.BasicAuthLogin,
-      LoginApproachServiceName.OidcAuthLogin,
-    ],
-    passwordHashSecretKey: process.env.PASSWORD_HASH_SECRET_KEY!,
-    jwtSecret: process.env.AUTH_JWT_SECRET!,
-    jwtIssuer: 'my-system',
-    jwtAudience: 'my-system-clients',
-    jwtExpiresInSeconds: 3600,
-    refreshTokens: {
-      ttlDays: 30,
-      expiresInMinutes: 600,
-      cleanupBatchSize: 500,
-      cleanupMaxQueries: 20,
+    // Optional: skip policy middleware (see Authorization section).
+    // authorization: { skipAllAuthorization: true },
+
+    // Everything for authentication lives under authentication (like authorization).
+    authentication: {
+      loginApproaches: [
+        LoginApproachServiceName.ApiKeyAuthLogin,
+        LoginApproachServiceName.BasicAuthLogin,
+        LoginApproachServiceName.OidcAuthLogin,
+      ],
+      passwordHashSecretKey: process.env.PASSWORD_HASH_SECRET_KEY!,
+      jwtSecret: process.env.AUTH_JWT_SECRET!,
+      jwtIssuer: 'my-system',
+      jwtAudience: 'my-system-clients',
+      jwtExpiresInSeconds: 3600,
+      refreshTokens: {
+        ttlDays: 30,
+        expiresInMinutes: 600,
+        cleanupBatchSize: 500,
+        cleanupMaxQueries: 20,
+      },
+      jwksUris: ['https://your-provider/.well-known/jwks.json'],
+
+      // Optional upstream Bearer (often with loginApproaches: [] on MCP).
+      oauthPassthrough: {
+        enabled: true,
+        validateMode: 'jwks',
+        autoProvision: true,
+        claimMapping: {},
+      },
+
+      // loginPath: '/login',
+      // loginMethod: 'POST',
+      // refreshPath: '/token/refresh',
+      // refreshMethod: 'POST',
     },
-    // OIDC/JWKS verification inputs (when using OIDC login):
-    jwksUris: ['https://your-provider/.well-known/jwks.json'],
-    // Optional transport route overrides:
-    // loginPath: '/login',
-    // loginMethod: 'POST',
-    // refreshPath: '/token/refresh',
-    // refreshMethod: 'POST',
   },
 }
 ```
@@ -206,58 +232,47 @@ type OrganizationReferenceProperty = Readonly<{
 
 ```typescript
 {
-  // Ordered fallback chain. First approach that resolves a user wins.
-  loginApproaches: ReadonlyArray<LoginApproachServiceName | string>
-
-  // Optional schema validation for login request payloads.
-  loginPropsSchema?: ZodType<JsonObj>
-
-  // If true, bypasses auth middleware (use with caution).
-  skipAllAuthentication?: boolean
-
-  // Defaults: ['email', 'username']
-  basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
-
-  // Optional OIDC payload parser override (defaults use iss/sub claims).
-  parseOidcPayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
-
-  // Required for password hashing/verification when basic auth is enabled.
-  passwordHashSecretKey?: string
-
-  // Login audit behavior.
-  noSaveLoginAttempts?: boolean
-
-  // System JWT settings for issued tokens.
-  jwtSecret?: string
-  jwtIssuer?: string
-  jwtAudience?: string
-  jwtExpiresInSeconds?: number
-  jwtAlgorithms?: readonly string[]
-
-  // Refresh token issuance + cleanup controls.
-  refreshTokens?: {
-    // Retention period after expiration for cleanup purposes.
-    // default: 30
-    ttlDays?: number
-    // Lifetime of newly issued refresh tokens.
-    // default: 600
-    expiresInMinutes?: number
-    // Max deletes per cleanup query.
-    // default: 500
-    cleanupBatchSize?: number
-    // Max cleanup queries per cleanup call.
-    // default: 20
-    cleanupMaxQueries?: number
+  authorization?: {
+    skipAllAuthorization?: boolean
   }
 
-  // Used for OIDC provider token verification.
-  jwksUris?: readonly string[]
-
-  // Transport endpoint overrides.
-  loginPath?: string // default '/login'
-  loginMethod?: string // default 'POST'
-  refreshPath?: string // default '/token/refresh'
-  refreshMethod?: string // default 'POST'
+  /** Required. All login/JWT/refresh/OIDC/pass-through settings. */
+  authentication: {
+    loginApproaches: ReadonlyArray<LoginApproachServiceName | string>
+    loginPropsSchema?: ZodType<JsonObj>
+    skipAllAuthentication?: boolean
+    basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
+    parseOidcPayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
+    passwordHashSecretKey?: string
+    noSaveLoginAttempts?: boolean
+    jwtSecret?: string
+    jwtIssuer?: string
+    jwtAudience?: string
+    jwtExpiresInSeconds?: number
+    jwtAlgorithms?: readonly string[]
+    refreshTokens?: {
+      ttlDays?: number
+      expiresInMinutes?: number
+      cleanupBatchSize?: number
+      cleanupMaxQueries?: number
+    }
+    jwksUris?: readonly string[]
+    oauthPassthrough?: {
+      enabled: boolean
+      validateMode?: 'jwks' | 'opaque'
+      autoProvision?: boolean
+      claimMapping?: {
+        email?: string
+        firstName?: string
+        lastName?: string
+        username?: string
+      }
+    }
+    loginPath?: string
+    loginMethod?: string
+    refreshPath?: string
+    refreshMethod?: string
+  }
 }
 ```
 
@@ -324,9 +339,11 @@ type LoginRequest = {
 
 ## `authenticate()` Flow
 
-`authenticate()` validates a system JWT and returns the authenticated user.
+Without pass-through: `authenticate()` validates a **system** JWT and returns the user.
 
-- Success: returns user object.
+With **OAuth pass-through** (`authentication.oauthPassthrough.enabled` on `[AuthNamespace.Api]`): the same Bearer is verified per `validateMode` (**jwks** → OIDC JWT + optional **autoProvision**; **opaque** → any non-empty Bearer, no user). API services expose **`getPassthroughHttpClient(crossLayerProps)`** so features can call outbound HTTP with the same Authorization header.
+
+- Success: user object (or `void` in opaque mode when no user is attached).
 - Failure: returns `AUTH_FAILED`.
 
 ```mermaid
@@ -378,8 +395,8 @@ flowchart TD
 
 When integrated with REST or MCP hosts:
 
-- A login route is registered as unprotected (default `POST /login`).
-- A refresh route is registered as unprotected (default `POST /token/refresh`).
+- If OAuth pass-through is enabled with no login approaches, login/refresh routes and the login tool are omitted; cleanup and protected routes still apply.
+- Otherwise: login (`POST /login`) and refresh (`POST /token/refresh`) routes are registered as unprotected.
 - A pre-route auth middleware is registered.
 - Protected routes require `Authorization: Bearer <system-jwt>`.
 - You can add unprotected and protected routes explicitly.

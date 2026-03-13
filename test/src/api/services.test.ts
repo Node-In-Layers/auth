@@ -13,11 +13,14 @@ const createBaseContext = (
   coreConfigOverrides: Partial<any> = {}
 ): _TestContext => {
   const apiConfig = {
-    jwtSecret: 'jwt-secret',
-    jwtIssuer: 'issuer',
-    jwtAudience: 'audience',
-    jwtExpiresInSeconds: 60,
-    ...apiConfigOverrides,
+    authentication: {
+      loginApproaches: ['@node-in-layers/auth/api.apiKeyAuthLogin'] as string[],
+      jwtSecret: 'jwt-secret',
+      jwtIssuer: 'issuer',
+      jwtAudience: 'audience',
+      jwtExpiresInSeconds: 60,
+      ...apiConfigOverrides,
+    },
   }
 
   const coreConfig = {

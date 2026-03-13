@@ -38,3 +38,10 @@ Feature: MCP auth route protection
     Given we use "mcp-default" mcp context
     When we call mcp request "resources-read-no-auth"
     Then result should match "mcp-non-execute-unprotected"
+
+  Scenario: Passthrough probe MCP tool echoes OIDC Authorization header
+    Given we use "mcp-passthrough-oidc" mcp context
+    And we seed "oidc-user-identity" auth records
+    And we set expected authorization to oidc bearer
+    When we call mcp request tool-passthrough-probe with oidc bearer
+    Then result should match "mcp-passthrough-probe-bearer"

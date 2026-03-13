@@ -15,3 +15,10 @@ Feature: Express auth route protection
     And we seed "basic-user-enabled" auth records
     When we call express request "login-no-auth"
     Then result should match "express-login-unprotected"
+
+  Scenario: Passthrough probe domain echoes OIDC Authorization via express
+    Given we use "express-passthrough-oidc" express context
+    And we seed "oidc-user-identity" auth records
+    And we set expected authorization to oidc bearer
+    When we call express request passthrough-probe with oidc bearer
+    Then result should match "express-passthrough-probe-bearer"

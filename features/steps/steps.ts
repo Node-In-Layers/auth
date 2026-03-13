@@ -13,6 +13,7 @@ import {
 import {
   CoreNamespace,
   createErrorObject,
+  FeaturesContext,
   loadSystem,
   LogFormat,
   LogLevelNames,
@@ -20,13 +21,19 @@ import {
 } from '@node-in-layers/core'
 import {
   api,
+  ApiServicesLayer,
   auth,
   AuthConfig,
   AuthNamespace,
   LoginApproachServiceName,
 } from '../../src'
+import { OAuthPassthroughValidateMode } from '../../src/types.js'
 import { DataConfig, DataNamespace } from '@node-in-layers/data/types'
-import { createMcpResponse, hashPassword } from '../../src/api/internal-libs.js'
+import {
+  createMcpResponse,
+  getHeaders,
+  hashPassword,
+} from '../../src/api/internal-libs.js'
 import {
   queryBuilder,
   EmailProperty,
@@ -48,6 +55,7 @@ type _World = {
   result?: any
   mcpState?: _McpState
   expressState?: _ExpressState
+  expectedAuthorization?: string
 }
 
 type _ContextFactory = () => Promise<any>
@@ -169,9 +177,10 @@ const _createMockMcp = () => {
         : params.input && typeof params.input === 'object'
           ? params.input
           : {}
-    const result = await tool.execute(args)
+    const result = await tool.execute(args, req)
     res.json(result)
   })
+  const crossLayerPropMiddlewares: any[] = []
   const mockMcp = {
     addAnnotatedFunction: sinon
       .stub()
@@ -182,7 +191,7 @@ const _createMockMcp = () => {
             options?.description || annotatedFunction.schema?.description,
           inputSchema: undefined,
           outputSchema: undefined,
-          execute: sinon.stub().callsFake(async (input: any) => {
+          execute: sinon.stub().callsFake(async (input: any, req: any) => {
             const r = await annotatedFunction(input)
             return createMcpResponse(r)
           }),
@@ -193,6 +202,32 @@ const _createMockMcp = () => {
     }),
     addTool: sinon.stub().callsFake((tool: any) => {
       tools.set(tool.name, tool)
+    }),
+    // Mirror mcp-server: CrossLayerPropMiddleware returns props (or void); it does
+    // not call next(). Wrapping avoids runPreRouteMiddlewares hanging (next never called).
+    addCrossLayerPropMiddleware: sinon.stub().callsFake((middleware: any) => {
+      preRouteMiddlewares.push(async (req: any, res: any, next: any) => {
+        try {
+          const result = await Promise.resolve(middleware(req, res, next))
+          if (
+            result !== undefined &&
+            result !== null &&
+            _isErrorObject(result)
+          ) {
+            next(result)
+            return
+          }
+          if (result && typeof result === 'object') {
+            if (!req.extendedCrossLayerProps) {
+              req.extendedCrossLayerProps = {}
+            }
+            Object.assign(req.extendedCrossLayerProps, result)
+          }
+          next()
+        } catch (e) {
+          next(e)
+        }
+      })
     }),
     addAdditionalRoute: sinon
       .stub()
@@ -323,6 +358,24 @@ const _createCustomAuthApp = () => ({
   },
 })
 
+const _createPassthroughProbeApp = () => ({
+  name: 'passthrough-probe',
+  services: { create: () => ({}) },
+  features: {
+    create: (context: FeaturesContext<any, ApiServicesLayer>) => ({
+      echoPassthroughHeaders: async (
+        _input: unknown,
+        crossLayerProps: { requestInfo?: { headers?: Record<string, string> } }
+      ) => {
+        const client = context.services[
+          AuthNamespace.Api
+        ].getPassthroughHttpClient(crossLayerProps as any)
+        return { headers: client.defaults.headers }
+      },
+    }),
+  },
+})
+
 const _createSystem = async (
   overrides?: Record<string, any>,
   extraApps: any[] = [],
@@ -365,12 +418,17 @@ const _createSystem = async (
         allowPasswordAuthentication: false,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [],
-        passwordHashSecretKey: 'feature-test-password-pepper',
-        jwtSecret: 'feature-test-jwt-secret',
-        jwtIssuer: 'feature-tests',
-        jwtAudience: 'feature-tests',
-        jwtExpiresInSeconds: 5000,
+        authorization: {
+          skipAllAuthorization: true,
+        },
+        authentication: {
+          loginApproaches: [],
+          passwordHashSecretKey: 'feature-test-password-pepper',
+          jwtSecret: 'feature-test-jwt-secret',
+          jwtIssuer: 'feature-tests',
+          jwtAudience: 'feature-tests',
+          jwtExpiresInSeconds: 5000,
+        },
       },
     } as AuthConfig,
     overrides ?? {}
@@ -483,18 +541,22 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         allowPasswordAuthentication: true,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        },
       },
     }),
   'oidc-default': async () => {
     const provider = await _ensureOidcProvider()
     const system = await _createSystem({
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.OidcAuthLogin],
-        jwksUris: [provider.jwksUri],
-        jwtIssuer: provider.issuer,
-        jwtAudience: 'feature-test-client',
-        jwtSecret: undefined,
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.OidcAuthLogin],
+          jwksUris: [provider.jwksUri],
+          jwtIssuer: provider.issuer,
+          jwtAudience: 'feature-test-client',
+          jwtSecret: undefined,
+        },
       },
     })
     // buildJwt depends on jwtSecret. In this OIDC context we purposely disable jwtSecret
@@ -507,7 +569,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
   'api-key-default': () =>
     _createSystem({
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.ApiKeyAuthLogin],
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.ApiKeyAuthLogin],
+        },
       },
     }),
   'api-key-then-basic': () =>
@@ -516,32 +580,34 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         allowPasswordAuthentication: true,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [
-          LoginApproachServiceName.ApiKeyAuthLogin,
-          LoginApproachServiceName.BasicAuthLogin,
-        ],
-        // Fallthrough tests intentionally submit both payloads.
-        // Override default XOR login schema for this context.
-        loginPropsSchema: z.object({
-          basicAuth: z
-            .object({
-              identifier: z.string(),
-              password: z.string(),
-            })
-            .optional(),
-          apiKeyAuth: z
-            .object({
-              key: z.string(),
-            })
-            .optional(),
-        }),
+        authentication: {
+          loginApproaches: [
+            LoginApproachServiceName.ApiKeyAuthLogin,
+            LoginApproachServiceName.BasicAuthLogin,
+          ],
+          loginPropsSchema: z.object({
+            basicAuth: z
+              .object({
+                identifier: z.string(),
+                password: z.string(),
+              })
+              .optional(),
+            apiKeyAuth: z
+              .object({
+                key: z.string(),
+              })
+              .optional(),
+          }),
+        },
       },
     }),
   'custom-login-default-schema': () =>
     _createSystem(
       {
         [AuthNamespace.Api]: {
-          loginApproaches: ['custom-auth.customAuthLogin'],
+          authentication: {
+            loginApproaches: ['custom-auth.customAuthLogin'],
+          },
         },
       },
       [_createCustomAuthApp()]
@@ -550,12 +616,14 @@ const _CONTEXT: Record<string, _ContextFactory> = {
     _createSystem(
       {
         [AuthNamespace.Api]: {
-          loginApproaches: ['custom-auth.customAuthLogin'],
-          loginPropsSchema: z.object({
-            customAuth: z.object({
-              customKey: z.string(),
+          authentication: {
+            loginApproaches: ['custom-auth.customAuthLogin'],
+            loginPropsSchema: z.object({
+              customAuth: z.object({
+                customKey: z.string(),
+              }),
             }),
-          }),
+          },
         },
       },
       [_createCustomAuthApp()]
@@ -568,7 +636,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
           userModel: 'custom-users.AnotherUsers',
         },
         [AuthNamespace.Api]: {
-          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          authentication: {
+            loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          },
         },
       },
       [_createCustomUsersApp()]
@@ -579,7 +649,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         allowPasswordAuthentication: true,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        },
       },
     }),
   'mcp-default': () =>
@@ -589,12 +661,68 @@ const _CONTEXT: Record<string, _ContextFactory> = {
           allowPasswordAuthentication: true,
         },
         [AuthNamespace.Api]: {
-          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          authentication: {
+            loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          },
         },
       },
       [],
       'mcp'
     ),
+  'mcp-passthrough-oidc': async () => {
+    const provider = await _ensureOidcProvider()
+    return _createSystem(
+      {
+        [AuthNamespace.Api]: {
+          authentication: {
+            loginApproaches: [],
+            oauthPassthrough: {
+              enabled: true,
+              validateMode: OAuthPassthroughValidateMode.Jwks,
+              autoProvision: true,
+            },
+            jwksUris: [provider.jwksUri],
+            jwtIssuer: provider.issuer,
+            jwtAudience: 'feature-test-client',
+            jwtSecret: 'feature-test-jwt-secret',
+          },
+        },
+      },
+      [_createPassthroughProbeApp()],
+      'mcp'
+    )
+  },
+  'express-passthrough-oidc': async () => {
+    const provider = await _ensureOidcProvider()
+    return _createSystem(
+      {
+        [AuthNamespace.Api]: {
+          authentication: {
+            loginApproaches: [],
+            oauthPassthrough: {
+              enabled: true,
+              validateMode: OAuthPassthroughValidateMode.Jwks,
+              autoProvision: true,
+            },
+            jwksUris: [provider.jwksUri],
+            jwtIssuer: provider.issuer,
+            jwtAudience: 'feature-test-client',
+            jwtSecret: 'feature-test-jwt-secret',
+          },
+        },
+      },
+      [_createPassthroughProbeApp()],
+      'rest'
+    )
+  },
+}
+
+const _findUserByOidcBearer = async (context: any) => {
+  const token = await _getOidcToken()
+  const api = context.services[AuthNamespace.Api] as any
+  const payload = await api.verifyJwtWithJwks(token)
+  const ids = api.getOidcUserLookupIdentifiers(payload)
+  return api.findUserByOidcIdentifiers(ids)
 }
 
 const _getCruds = (context: any, modelName: string): any => {
@@ -871,6 +999,19 @@ const _MCP_REQUESTS: Record<string, _McpRequestFactory> = {
       },
     },
   }),
+  'tool-passthrough-probe': () => ({
+    path: '/',
+    method: 'POST',
+    body: {
+      jsonrpc: '2.0',
+      id: 'test-passthrough-probe',
+      method: 'tools/execute',
+      params: {
+        toolName: 'echoPassthroughHeaders',
+        arguments: {},
+      },
+    },
+  }),
 }
 
 const _EXPRESS_REQUESTS: Record<string, _ExpressRequestFactory> = {
@@ -891,6 +1032,10 @@ const _EXPRESS_REQUESTS: Record<string, _ExpressRequestFactory> = {
         password: 'basic-password-1',
       },
     },
+  }),
+  'passthrough-probe-get': () => ({
+    path: '/passthrough-probe',
+    method: 'GET',
   }),
 }
 
@@ -1093,6 +1238,33 @@ const _ASSERTIONS: Record<string, _Assertion> = {
   'mcp-non-execute-unprotected': async world => {
     _assertMcpNonExecuteUnprotected(world)
   },
+  'express-passthrough-probe-bearer': async world => {
+    _assert(
+      world.result?.statusCode === 200,
+      `expected 200, got ${world.result?.statusCode}`
+    )
+    const h = world.result?.body?.headers?.Authorization
+    _assert(
+      h === world.expectedAuthorization,
+      `expected Authorization ${world.expectedAuthorization}, got ${h}`
+    )
+  },
+  'mcp-passthrough-probe-bearer': async world => {
+    _assert(
+      world.result?.statusCode === 200,
+      `expected 200, got ${world.result?.statusCode}`
+    )
+    const payload = _getMcpToolPayload(world.result)
+    _assert(
+      !payload?.error,
+      `echoPassthroughHeaders error: ${JSON.stringify(payload)}`
+    )
+    const h = payload?.headers?.Authorization
+    _assert(
+      h === world.expectedAuthorization,
+      `expected Authorization ${world.expectedAuthorization}, got ${h}`
+    )
+  },
   'express-unprotected-success': async world => {
     _assertExpressUnprotectedSuccess(world.result)
   },
@@ -1101,6 +1273,22 @@ const _ASSERTIONS: Record<string, _Assertion> = {
   },
   'express-login-unprotected': async world => {
     _assertExpressLoginUnprotected(world)
+  },
+  'authenticate-passthrough-provisioned-user': async world => {
+    _assert(
+      !_isErrorObject(world.result),
+      `expected authenticate success, got ${JSON.stringify(world.result)}`
+    )
+    _assert(
+      typeof world.result?.email === 'string' && world.result.email.length > 0,
+      'expected provisioned user email on authenticate result'
+    )
+    const again = await _findUserByOidcBearer(world.context)
+    _assert(!!again, 'expected user linked to OIDC token after authenticate')
+    _assert(
+      again?.email === world.result?.email,
+      'expected same user email from DB as authenticate result'
+    )
   },
 }
 
@@ -1112,6 +1300,35 @@ Given(
       throw new Error(`Unknown context key "${contextKey}"`)
     }
     this.context = await createContext()
+  }
+)
+
+Given(
+  'there is no user linked to the current oidc token',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    const user = await _findUserByOidcBearer(this.context)
+    _assert(
+      !user,
+      `expected no user for current OIDC token, found ${JSON.stringify(user)}`
+    )
+  }
+)
+
+Then(
+  'a user is linked to the current oidc token',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    const user = await _findUserByOidcBearer(this.context)
+    _assert(!!user, 'expected a user linked to current OIDC token')
+    _assert(
+      typeof user?.email === 'string',
+      'expected linked user to have email'
+    )
   }
 )
 
@@ -1156,6 +1373,35 @@ Given(
     expressApi.addUnprotectedRoute('/health', 'GET', async (_req, res) => {
       res.json({ ok: 'health' })
     })
+    const probe = this.context.features?.['passthrough-probe']
+    if (probe?.echoPassthroughHeaders) {
+      expressApi.addUnprotectedRoute(
+        '/passthrough-probe',
+        'GET',
+        async (req: any, res: any) => {
+          const headers: Record<string, string> = {}
+          for (const [k, v] of Object.entries(req.headers || {})) {
+            headers[k] = Array.isArray(v) ? String(v[0]) : String(v as string)
+          }
+          const crossLayerProps = {
+            requestInfo: {
+              headers,
+              body: {},
+              query: {},
+              params: {},
+              path: req.path || '',
+              method: req.method || 'GET',
+              url: req.get?.('host')
+                ? `${req.protocol}://${req.get('host')}${req.originalUrl || ''}`
+                : '',
+              protocol: req.protocol || 'http',
+            },
+          }
+          const out = await probe.echoPassthroughHeaders({}, crossLayerProps)
+          res.json(out)
+        }
+      )
+    }
     expressApi.addCustomProtectedRoute(
       '/protected',
       'GET',
@@ -1198,6 +1444,34 @@ Given(
     mcpApi.addCustomProtectedRoute('/protected', 'GET', async (_req, res) => {
       res.json({ ok: 'protected' })
     })
+    const probe = this.context.features?.['passthrough-probe']
+    if (probe?.echoPassthroughHeaders) {
+      mcpApp.mockMcp.addTool({
+        name: 'echoPassthroughHeaders',
+        execute: async (_input: any, req: any) => {
+          const headers: Record<string, string> = {}
+          for (const [k, v] of Object.entries(req?.headers || {})) {
+            headers[k] = Array.isArray(v) ? String(v[0]) : String(v as string)
+          }
+          const host = req?.get?.('host') || headers.host || ''
+          const protocol = req?.protocol || 'http'
+          const crossLayerProps = {
+            requestInfo: {
+              headers,
+              body: {},
+              query: {},
+              params: {},
+              path: req?.path || '',
+              method: req?.method || 'POST',
+              url: host ? `${protocol}://${host}${req?.originalUrl || ''}` : '',
+              protocol,
+            },
+          }
+          const r = await probe.echoPassthroughHeaders({}, crossLayerProps)
+          return createMcpResponse(r)
+        },
+      })
+    }
     this.mcpState = {
       requester: supertest(mcpApp.expressApp),
     }
@@ -1226,6 +1500,33 @@ When(
       req = req.send(request.body)
     }
     const response = await req
+    this.result = {
+      statusCode: response.status,
+      body: response.body,
+    }
+  }
+)
+
+Given(
+  'we set expected authorization to oidc bearer',
+  async function (this: _World) {
+    const token = await _getOidcToken()
+    this.expectedAuthorization = `Bearer ${token}`
+  }
+)
+
+When(
+  'we call express request passthrough-probe with oidc bearer',
+  async function (this: _World) {
+    if (!this.expressState) {
+      throw new Error(
+        'Express context not set. Run "Given we use {string} express context" first.'
+      )
+    }
+    const token = await _getOidcToken()
+    const response = await this.expressState.requester
+      .get('/passthrough-probe')
+      .set('Authorization', `Bearer ${token}`)
     this.result = {
       statusCode: response.status,
       body: response.body,
@@ -1264,6 +1565,21 @@ When(
         'No token available on world.result. Run a successful login first.'
       )
     }
+    this.result = await this.context.features[AuthNamespace.Api].authenticate({
+      token,
+    })
+  }
+)
+
+When(
+  'we run auth authenticate with oidc bearer',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error(
+        'Context not set. Run "Given we use {string} context" first.'
+      )
+    }
+    const token = await _getOidcToken()
     this.result = await this.context.features[AuthNamespace.Api].authenticate({
       token,
     })
@@ -1356,6 +1672,27 @@ When(
       req = req.send(request.body)
     }
     const response = await req
+    this.result = {
+      statusCode: response.status,
+      body: response.body,
+    }
+  }
+)
+
+When(
+  'we call mcp request tool-passthrough-probe with oidc bearer',
+  async function (this: _World) {
+    if (!this.mcpState) {
+      throw new Error(
+        'MCP context not set. Run "Given we use {string} mcp context" first.'
+      )
+    }
+    const token = await _getOidcToken()
+    const request = _MCP_REQUESTS['tool-passthrough-probe']()
+    const response = await this.mcpState.requester
+      .post(request.path)
+      .set('Authorization', `Bearer ${token}`)
+      .send(request.body)
     this.result = {
       statusCode: response.status,
       body: response.body,

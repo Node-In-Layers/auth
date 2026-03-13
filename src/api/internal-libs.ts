@@ -1,8 +1,14 @@
 import { pbkdf2, randomBytes, timingSafeEqual } from 'node:crypto'
+import get from 'lodash/get.js'
 import { FeaturesContext, isErrorObject } from '@node-in-layers/core'
 import { JWTPayload } from 'jose'
 import { JsonAble, JsonObj } from 'functional-models'
-import { AuthConfig, AuthNamespace, type ApiConfig } from '../types.js'
+import {
+  AuthConfig,
+  AuthNamespace,
+  type ApiAuthenticationConfig,
+  type ApiConfig,
+} from '../types.js'
 import type { User } from '../core/types.js'
 import type { LoginApproach } from './types.js'
 
@@ -69,22 +75,16 @@ const ensureApiLoaded = (context: FeaturesContext<AuthConfig>): void => {
       `Api auth domain "${AuthNamespace.Api}" not found in context.services. Likely not loaded.`
     )
   }
-  if (
-    typeof api.buildJwt !== 'function' ||
-    typeof api.validateJwt !== 'function'
-  ) {
-    throw new Error(
-      `Api "${AuthNamespace.Api}" must provide buildJwt and validateJwt.`
-    )
-  }
 }
 
 export const unpackAuthentication = (
   context: FeaturesContext<AuthConfig>
 ): _UnpackedAuth => {
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
+  const auth = apiConfig?.authentication
 
-  if (!apiConfig?.loginApproaches?.length) {
+  const passthroughOnly = auth?.oauthPassthrough?.enabled === true
+  if (!auth?.loginApproaches?.length && !passthroughOnly) {
     throw new Error(
       `Auth api config not found or loginApproaches empty. Likely not included in config (${AuthNamespace.Api}).`
     )
@@ -92,9 +92,16 @@ export const unpackAuthentication = (
 
   ensureApiLoaded(context)
 
+  if (!apiConfig) {
+    throw new Error(
+      `Auth api config not found. Likely not included in config (${AuthNamespace.Api}).`
+    )
+  }
+
+  const approachIds = auth?.loginApproaches ?? []
   return {
     apiConfig,
-    loginApproaches: apiConfig.loginApproaches.map(id => ({
+    loginApproaches: approachIds.map(id => ({
       loginApproach: id,
       fn: getLoginApproachFn(context, id),
     })),
@@ -142,8 +149,10 @@ const _pbkdf2 = async (
     )
   })
 
-export const requirePasswordHashSecretKey = (apiConfig: ApiConfig): string => {
-  const secret = apiConfig.passwordHashSecretKey
+export const requirePasswordHashSecretKey = (
+  authentication: ApiAuthenticationConfig
+): string => {
+  const secret = authentication.passwordHashSecretKey
   if (!secret) {
     throw new Error(
       'auth api passwordHashSecretKey is required when password authentication is enabled'
@@ -229,4 +238,16 @@ export const createMcpResponse = <T extends JsonAble>(
       },
     ],
   }
+}
+
+export const getHeaders = (crossLayerProps: any): Record<string, string> => {
+  const authorization =
+    get(crossLayerProps, 'requestInfo.headers.Authorization') ||
+    get(crossLayerProps, 'requestInfo.headers.authorization')
+  if (authorization) {
+    return {
+      Authorization: authorization as string,
+    }
+  }
+  return {}
 }

@@ -1,26 +1,42 @@
+import { CrossLayerProps, LayerFunction } from '@node-in-layers/core'
 import { PrimaryKeyType } from 'functional-models'
 import { z } from 'zod'
+import { AuthNamespace, PolicyAction } from '../types.js'
+
+export type CoreAuthConfig = Readonly<{
+  caching?: {
+    systemAdminCheck: number
+  }
+}>
 
 /** Core auth layer services (reserved for future use). */
-export type CoreServices = Readonly<object>
+export type AuthCoreServices = Readonly<{
+  isUserSystemAdmin: LayerFunction<(user: User) => Promise<boolean>>
+  isOrganizationAdmin: LayerFunction<
+    (user: User, organizationId: PrimaryKeyType) => Promise<boolean>
+  >
+  getUserOrganizationAttributes: LayerFunction<
+    (user: User) => Promise<Record<string, string>>
+  >
+}>
 
 /**
  * Layer shape exposing core auth services.
  * @interface
  */
-export type CoreServicesLayer = Readonly<{
-  core: CoreServices
+export type AuthCoreServicesLayer = Readonly<{
+  [AuthNamespace.Core]: AuthCoreServices
 }>
 
 /** Core auth layer features (reserved for future use). */
-export type CoreFeatures = Readonly<object>
+export type AuthCoreFeatures = Readonly<object>
 
 /**
  * Layer shape exposing core auth features.
  * @interface
  */
 export type CoreFeaturesLayer = Readonly<{
-  core: CoreFeatures
+  [AuthNamespace.Core]: AuthCoreFeatures
 }>
 
 /**
@@ -110,34 +126,85 @@ export type OrganizationAttribute = Readonly<{
   updatedAt?: string
 }>
 
-/** Policy rule action: allow or deny access. */
-export enum PolicyAction {
-  Allow = 'ALLOW',
-  Deny = 'DENY',
+export enum ResourceTypeForPolicy {
+  Models = 'models',
+  Features = 'features',
+  Functions = 'functions',
 }
 
 /**
- * Policy entity: name, action (allow/deny), resources, and optional attribute constraints.
+ * Standard actions for resources used in policies.
+ */
+export enum ActionForPolicy {
+  Create = 'Create',
+  Retrieve = 'Retrieve',
+  Update = 'Update',
+  Delete = 'Delete',
+  Search = 'Search',
+  Execute = 'Execute',
+}
+
+/**
+ * The contextual information for evaluating policies.
  * @interface
  */
-export type Policy = Readonly<{
-  id: PrimaryKeyType
-  name: string
-  description?: string
+export type PolicyContext = Readonly<{
+  /**
+   * The domain the resource belongs to.
+   */
+  domain: string
+  /**
+   * The type of resource.
+   */
+  resourceType: ResourceTypeForPolicy
+  /**
+   * The resource name (e.g. plural model name or feature name).
+   */
+  resource: string
+  /**
+   * The action being attempted.
+   */
+  action: ActionForPolicy | string
+  /**
+   * The ID of the user attempting the action.
+   */
+  userId: PrimaryKeyType
+  /**
+   * The ID of the organization if this is an organization-scoped resource.
+   */
   organizationId?: PrimaryKeyType
+  /**
+   * Data of the row being accessed, for row-level policies.
+   */
+  rowData?: Record<string, any>
+  /**
+   * IP address of the request
+   */
+  ip?: string
+  /**
+   * Request ID for the request
+   */
+  requestId?: string
+}>
+
+/**
+ * The response from a policy evaluation.
+ */
+export type PolicyEvaluationResponse = Readonly<{
   action: PolicyAction
+  reason?: string
+}>
+
+export type PolicyEngineContext = Readonly<{
+  request: PolicyContext
+  isSystemAdmin: boolean
+  isOrgAdmin: boolean
   /**
-   * Resource policy strings for stating what resources can be accessed.
+   * User attributes mapped to a dictionary for easy lookup.
+   * If the request is org-scoped, this should contain org attributes.
+   * Otherwise, it can contain system-level attributes if applicable.
    */
-  resources: ReadonlyArray<string>
-  /**
-   * Data attribute level controls. "You must have this key:value attribute in order to access this data"
-   * If this is not provided, this policy applies to everyone who is associated with the organization.
-   * (This happens by the OrganizationAttribute model with a key "member" and the value being the user's id.)
-   */
-  attributes?: readonly Record<string, string>[]
-  createdAt?: string
-  updatedAt?: string
+  userAttributes: Record<string, string>
 }>
 
 /** Outcome of a single login attempt. */
@@ -273,3 +340,10 @@ export type RefreshToken = Readonly<{
   createdAt?: string
   updatedAt?: string
 }>
+
+/**
+ * The cross layer props provided by the auth module.
+ */
+export type AuthCrossLayerProps = CrossLayerProps & {
+  user?: User
+}
