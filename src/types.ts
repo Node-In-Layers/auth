@@ -7,7 +7,40 @@ import {
   PropertyInstance,
   JsonObj,
 } from 'functional-models'
-import { Policy } from './core/types.js'
+
+/** Policy rule action: allow or deny access. */
+export enum PolicyAction {
+  Allow = 'ALLOW',
+  Deny = 'DENY',
+}
+
+/**
+ * Policy entity: name, action (allow/deny), resources, and optional attribute constraints.
+ * @interface
+ */
+export type Policy = Readonly<{
+  id: PrimaryKeyType
+  name: string
+  description?: string
+  organizationId?: PrimaryKeyType
+  action: PolicyAction
+  /**
+   * Resource policy strings for stating what resources can be accessed.
+   */
+  resources: ReadonlyArray<string>
+  /**
+   * Specific users this policy targets directly.
+   */
+  userIds?: ReadonlyArray<PrimaryKeyType>
+  /**
+   * Data attribute level controls. "You must have this key:value attribute in order to access this data"
+   * If this is not provided, this policy applies to everyone who is associated with the organization.
+   * (This happens by the OrganizationAttribute model with a key "member" and the value being the user's id.)
+   */
+  attributes?: readonly Record<string, string>[]
+  createdAt?: string
+  updatedAt?: string
+}>
 
 /**
  * Factory for creating a property instance with optional config and metadata.
@@ -50,6 +83,11 @@ export type OidcUserLookupIdentifiers = Readonly<{
  * @interface
  */
 export type ApiConfig = Readonly<{
+  authorization?: {
+    skipAllAuthorization?: boolean
+  }
+  // TODO: We need to migrate all the configurations for authentication to this object.
+  authentication?: object
   /**
    * Optional override schema for login request payload (`props.request`).
    * If not provided, the default auth login request schema is used.
@@ -143,7 +181,7 @@ export type AuthConfigurations = Readonly<{
      */
     userModel?: string
     systemLevelPolicies: readonly Policy[]
-    userPropertyOverrides?: Record<string, PropertyConfig<any>>
+    userPropertyOverrides?: Record<string, PropertyConfig<object>>
     /**
      * If this is true, then the system will require a password hash for a user.
      */

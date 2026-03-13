@@ -1,15 +1,36 @@
+import flow from 'lodash/flow.js'
 import {
+  Config,
   createErrorObject,
   isErrorObject,
   NilAnnotatedFunction,
   type Response,
+  FeaturesContext,
 } from '@node-in-layers/core'
-import type { JsonObj } from 'functional-models'
-import type { User } from '../core/types.js'
+import {
+  isExecuteFeatureData,
+  isExecuteFunctionData,
+  isExecuteModelData,
+  isExecuteModelBulkDelete,
+  isExecuteModelBulkInsert,
+  isExecuteModelDelete,
+  isExecuteModelRetrieve,
+  isExecuteModelSave,
+  isExecuteModelSearch,
+} from '@node-in-layers/mcp'
+import type { JsonObj, PrimaryKeyType } from 'functional-models'
+import {
+  ActionForPolicy,
+  ResourceTypeForPolicy,
+  type PolicyContext,
+  type User,
+} from '../core/types.js'
+import { AuthNamespace, PolicyAction } from '../types.js'
 import type {
   ApiMiddleware,
   ApiProtectedRouteRegistration,
   ApiRouteHandler,
+  ApiServicesLayer,
   LoginFeatureProps,
   LoginResult,
   RefreshFeatureProps,
@@ -262,3 +283,92 @@ export const addUnprotectedRouteRegistration = (
     method: normalizeMethod(method),
   })
 }
+
+const _flow = [
+  isExecuteFunctionData,
+  isExecuteFeatureData,
+  isExecuteModelData,
+  isExecuteModelSave,
+  isExecuteModelDelete,
+  isExecuteModelSearch,
+  isExecuteModelBulkInsert,
+  isExecuteModelBulkDelete,
+  isExecuteModelRetrieve,
+].map(func => (data, previousResult = undefined) => {
+  if (previousResult) {
+    return previousResult
+  }
+  return func(data)
+})
+
+const _isAuthorizationHandled = req => {
+  return flow(_flow)(req)
+}
+
+export const authorizationMiddleware =
+  (context: FeaturesContext<Config, ApiServicesLayer>) =>
+  async (req, res, next) => {
+    const data = req.body
+    // Only MCP/transport "execute" payloads go through policy. Everything else
+    // (e.g. GET /health, POST /login, JSON-RPC) is already gated by auth middleware
+    // or is intentionally unauthenticated — do not require req.user here.
+    if (!_isAuthorizationHandled(req)) {
+      next()
+      return
+    }
+
+    const user = req.user
+    if (!user) {
+      res.status(NOT_AUTHORIZED).json(toUnauthorized('No user provided.'))
+      return
+    }
+
+    if (isExecuteFunctionData(data)) {
+      const policyContext: PolicyContext = {
+        domain: '',
+        resourceType: ResourceTypeForPolicy.Functions,
+        resource: data.functionName,
+        action: ActionForPolicy.Execute,
+        userId: user.id,
+        organizationId: data?.args.organizationId as PrimaryKeyType | undefined,
+        //rowData: data.rowData,
+        ip: req.ip,
+        requestId: req.id,
+      }
+      const result =
+        await context.features[AuthNamespace.Api].authorize(policyContext)
+      if (isErrorObject(result)) {
+        const log = context.log.getInnerLogger('authorizationMiddleware')
+        log.warn('Error authorizing function', result)
+        res.status(NOT_AUTHORIZED).json(result)
+        return
+      }
+      if (result?.action !== PolicyAction.Allow) {
+        res.status(NOT_AUTHORIZED).json(toUnauthorized('Not authorized.'))
+        return
+      }
+      next()
+      return
+    }
+    if (isExecuteFeatureData(data)) {
+      const policyContext: PolicyContext = {
+        domain: data.domain,
+        resourceType: ResourceTypeForPolicy.Features,
+        resource: data.featureName,
+        action: ActionForPolicy.Execute,
+        userId: user.id,
+      }
+      const result =
+        await context.features[AuthNamespace.Api].authorize(policyContext)
+      if (isErrorObject(result)) {
+        const log = context.log.getInnerLogger('authorizationMiddleware')
+        log.warn('Error authorizing feature', result)
+        res.status(NOT_AUTHORIZED).json(result)
+        return
+      }
+      next()
+      return
+    }
+
+    next()
+  }

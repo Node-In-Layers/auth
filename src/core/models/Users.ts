@@ -8,7 +8,7 @@ import {
 import { ModelProps } from '@node-in-layers/core'
 import { AuthNamespace, AuthConfig } from '../../types.js'
 import { User } from '../types.js'
-import { getUserPropertyOverride } from '../libs.js'
+import { getUserPropertyOverride } from '../libs/index.js'
 
 export const create = ({
   context,

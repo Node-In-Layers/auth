@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PrimaryKeyType } from 'functional-models'
 import {
   FeaturesContext,
   createErrorObject,
@@ -7,13 +8,19 @@ import {
   type CrossLayerProps,
   memoizeValueSync,
   annotatedFunction,
+  ModelCrudsFunctions,
 } from '@node-in-layers/core'
 import { AuthConfig, AuthNamespace } from '../types.js'
 import {
   LoginAttemptResult,
+  PolicyEngineContext,
   type LoginAttempt,
   type User,
+  AuthCoreServicesLayer,
+  PolicyContext,
 } from '../core/types.js'
+import { type Policy } from '../types.js'
+import { policyEngine } from '../core/libs/policy-engine.js'
 import { unpackAuthentication } from './internal-libs.js'
 import {
   ApiFeaturesLayer,
@@ -63,7 +70,11 @@ type _RefreshRequest = Readonly<{
 }>
 
 export const create = (
-  context: FeaturesContext<AuthConfig, ApiServicesLayer, ApiFeaturesLayer>
+  context: FeaturesContext<
+    AuthConfig,
+    ApiServicesLayer & AuthCoreServicesLayer,
+    ApiFeaturesLayer
+  >
 ): ApiFeatures => {
   const apiServices = context.services[AuthNamespace.Api] as ApiServices
   const LoginAttempts = getModel<LoginAttempt>(
@@ -225,5 +236,49 @@ export const create = (
           )
       )
   )
-  return { login, authenticate, refresh, cleanupRefreshTokens }
+
+  const authorize = async (
+    props: PolicyContext,
+    crossLayerProps?: CrossLayerProps
+  ) => {
+    const Users = context.services[AuthNamespace.Api].getUserCruds(
+      crossLayerProps
+    ) as ModelCrudsFunctions<User>
+
+    const userInstance = await Users.retrieve(props.userId)
+    if (!userInstance) {
+      return createErrorObject('USER_NOT_FOUND', 'User not found')
+    }
+    if (!userInstance.get.enabled()) {
+      return createErrorObject('USER_NOT_ENABLED', 'User is not enabled')
+    }
+
+    const user = await userInstance.toObj<User>()
+    const isSystemAdmin =
+      await context.services[AuthNamespace.Core].isUserSystemAdmin(user)
+    const userAttributes =
+      await context.services[AuthNamespace.Core].getUserOrganizationAttributes(
+        user
+      )
+    const isOrgAdmin = await (props.organizationId
+      ? context.services[AuthNamespace.Core].isOrganizationAdmin(
+          user,
+          props.organizationId as PrimaryKeyType
+        )
+      : Promise.resolve(false))
+
+    const policies: Policy[] = []
+    const policyEngineContext: PolicyEngineContext = {
+      request: props,
+      isSystemAdmin,
+      isOrgAdmin,
+      userAttributes,
+    }
+    const action = policyEngine(policies, policyEngineContext)
+    return {
+      action,
+    }
+  }
+
+  return { login, authenticate, refresh, cleanupRefreshTokens, authorize }
 }

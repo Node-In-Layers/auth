@@ -78,10 +78,9 @@ export default [
       'import/ignore': ['node_modules'],
       'import/resolver': {
         typescript: true,
-
-        moduleDirectory: ['node_modules', 'src/'],
         node: {
           extensions: ['.ts', '.tsx'],
+          moduleDirectory: ['node_modules', path.join(__dirname, 'src')],
         },
       },
     },

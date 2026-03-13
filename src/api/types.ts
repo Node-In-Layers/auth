@@ -1,17 +1,23 @@
+import express from 'express'
 import type { JsonObj } from 'functional-models'
 import type {
   LayerFunction,
   ModelCrudsFunctions,
   NilAnnotatedFunction,
-  Response,
   XOR,
+  Response,
+  CrossLayerProps,
 } from '@node-in-layers/core'
 import { annotationFunctionProps } from '@node-in-layers/core'
 import type { Request, Response as ExpressResponse } from 'express'
 import { z } from 'zod'
 import { AuthNamespace } from '../types.js'
 import { UserSchema } from '../core/types.js'
-import type { User } from '../core/types.js'
+import type {
+  PolicyContext,
+  PolicyEvaluationResponse,
+  User,
+} from '../core/types.js'
 
 /**
  * Reference to a custom user model in the form domain.PluralModelName.
@@ -115,7 +121,9 @@ export type ApiServices = Readonly<{
    * need the ability to get the correct user object.
    * @returns The CRUDS functions for the user model.
    */
-  getUserCruds: <TUser extends User = User>() => ModelCrudsFunctions<TUser>
+  getUserCruds: <TUser extends User = User>(
+    crossLayerProps?: CrossLayerProps
+  ) => ModelCrudsFunctions<TUser>
 }>
 
 /** Layer shape exposing API auth services under the auth API namespace. */
@@ -270,6 +278,9 @@ export type ApiFeatures = Readonly<{
     JsonObj,
     CleanupRefreshTokensResult
   >
+  authorize: LayerFunction<
+    (props: PolicyContext) => Promise<Response<PolicyEvaluationResponse>>
+  >
 }>
 
 /** Layer shape exposing API auth features under the auth API namespace. */
@@ -313,6 +324,12 @@ export type ApiProtectedRouteRegistration = Readonly<{
   handler?: ApiRouteHandler
 }>
 
+type _CrossLayerPropMiddleware = (
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) => Promise<Record<string, any> | void>
+
 /**
  * Host interface for registering annotated functions, middleware, and additional routes.
  * @interface
@@ -322,6 +339,7 @@ export type ApiHost = Readonly<{
     annotatedFunction: NilAnnotatedFunction<TIn, TOut>,
     options?: object
   ) => void
+  addCrossLayerPropMiddleware: (middleware: _CrossLayerPropMiddleware) => void
   addPreRouteMiddleware: (middleware: ApiMiddleware) => void
   addAdditionalRoute: (route: ApiAdditionalRoute) => void
 }>

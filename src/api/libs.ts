@@ -1,3 +1,5 @@
+import express from 'express'
+import type { User } from '../core/types.js'
 import type { CustomUserModelReference } from './types.js'
 
 /**
@@ -46,4 +48,18 @@ export const parseCustomUserModelReference = (
     domain,
     modelName,
   }
+}
+
+export const addUserToCrossLayerProps = (
+  req: express.Request
+): Promise<Readonly<{ user: User }> | undefined> => {
+  return Promise.resolve().then(() => {
+    const user = req.user
+    if (!user) {
+      return undefined
+    }
+    return {
+      user,
+    }
+  })
 }

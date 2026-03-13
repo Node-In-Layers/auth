@@ -172,6 +172,7 @@ const _createMockMcp = () => {
     const result = await tool.execute(args)
     res.json(result)
   })
+  const crossLayerPropMiddlewares: any[] = []
   const mockMcp = {
     addAnnotatedFunction: sinon
       .stub()
@@ -193,6 +194,32 @@ const _createMockMcp = () => {
     }),
     addTool: sinon.stub().callsFake((tool: any) => {
       tools.set(tool.name, tool)
+    }),
+    // Mirror mcp-server: CrossLayerPropMiddleware returns props (or void); it does
+    // not call next(). Wrapping avoids runPreRouteMiddlewares hanging (next never called).
+    addCrossLayerPropMiddleware: sinon.stub().callsFake((middleware: any) => {
+      preRouteMiddlewares.push(async (req: any, res: any, next: any) => {
+        try {
+          const result = await Promise.resolve(middleware(req, res, next))
+          if (
+            result !== undefined &&
+            result !== null &&
+            _isErrorObject(result)
+          ) {
+            next(result)
+            return
+          }
+          if (result && typeof result === 'object') {
+            if (!req.extendedCrossLayerProps) {
+              req.extendedCrossLayerProps = {}
+            }
+            Object.assign(req.extendedCrossLayerProps, result)
+          }
+          next()
+        } catch (e) {
+          next(e)
+        }
+      })
     }),
     addAdditionalRoute: sinon
       .stub()
@@ -365,6 +392,9 @@ const _createSystem = async (
         allowPasswordAuthentication: false,
       },
       [AuthNamespace.Api]: {
+        authorization: {
+          skipAllAuthorization: true,
+        },
         loginApproaches: [],
         passwordHashSecretKey: 'feature-test-password-pepper',
         jwtSecret: 'feature-test-jwt-secret',

@@ -31,21 +31,31 @@ import { CoreNamespace } from '@node-in-layers/core'
 import { DataNamespace } from '@node-in-layers/data'
 import { AuthNamespace, LoginApproachServiceName } from '@node-in-layers/auth'
 
+// Only needed for API.
+import { authModelCrudsOverrides } from '@node-in-layers/auth/api/index.js'
+
 const config = {
   [CoreNamespace.root]: {
     apps: [
       await import('@node-in-layers/data/index.js'),
 
       // Add "Transport" Layer (rest-api or mcp-server)
-      await import('@node-in-layers/rest-api/index.js'),
-      //await import('@node-in-layers/mcp-server/index.js'),
+      await import('@node-in-layers/mcp-server/index.js'),
+      //await import('@node-in-layers/rest-api/index.js'),
 
+      // ALWAYS needed. (Front or backend)
       await import('@node-in-layers/auth/core/index.js'), // core models + core services/features
+
+      // Only needed on a backend/api
       await import('@node-in-layers/auth/api/index.js'), // login/authenticate + transport auth wiring
     ],
     layerOrder: ['services', 'features', 'express'], // or ['services', 'features', 'mcp']
     modelFactory: '@node-in-layers/data',
     modelCruds: true,
+
+    // FOR API/BACKENDS ONLY:
+    // AUTHORIZATION: Add this as a drop-in replacement to the default cruds factory.
+    modelCrudsFactory: authModelCrudsOverrides(),
   },
   // ...
   // Core Configurations

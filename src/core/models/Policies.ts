@@ -5,7 +5,7 @@ import {
   ArrayProperty,
 } from 'functional-models'
 import { ModelProps } from '@node-in-layers/core'
-import { Policy } from '../types.js'
+import { type Policy } from '../../types.js'
 import { AuthConfig, AuthNamespace } from '../../types.js'
 
 export const create = ({
@@ -33,6 +33,7 @@ export const create = ({
       ),
       action: TextProperty({ required: true }),
       resources: ArrayProperty<string>(),
+      userIds: ArrayProperty<string | number>(),
       attributes: ArrayProperty<Record<string, string>>(),
       createdAt: DatetimeProperty({ autoNow: true }),
       updatedAt: LastModifiedDateProperty({ autoNow: true }),

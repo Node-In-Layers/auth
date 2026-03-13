@@ -1,5 +1,9 @@
 import { v4 as randomUUID } from 'uuid'
-import type { ModelCrudsFunctions, ServicesContext } from '@node-in-layers/core'
+import type {
+  ModelCrudsFunctions,
+  ServicesContext,
+  ModelCrudsFactoryOverride,
+} from '@node-in-layers/core'
 import jwt from 'jsonwebtoken'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import { getModel } from '@node-in-layers/core'
@@ -523,4 +527,8 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     basicAuthLogin,
     getUserCruds,
   }
+}
+
+export const authModelCrudsOverrides = (): ModelCrudsFactoryOverride[] => {
+  return []
 }

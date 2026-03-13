@@ -7,6 +7,7 @@ import type {
   ApiHost,
   ApiMcp,
   ApiProtectedRouteRegistration,
+  ApiServicesLayer,
 } from './types.js'
 import {
   DEFAULT_LOGIN_METHOD,
@@ -19,13 +20,15 @@ import {
   createLoginHandler,
   createRefreshHandler,
   normalizeMethod,
+  authorizationMiddleware,
 } from './internal-transport-libs.js'
+import { addUserToCrossLayerProps } from './libs.js'
 
 const MCP_NAMESPACE = '@node-in-layers/mcp-server'
 
 type _McpContext = FeaturesContext<
   Config,
-  object,
+  ApiServicesLayer,
   ApiFeaturesLayer,
   Readonly<{ mcp?: Readonly<Record<string, unknown>> }>
 >
@@ -134,6 +137,12 @@ export const create = (context: _McpContext): ApiMcp => {
   addProtectedFeature(context.features[AuthNamespace.Api].cleanupRefreshTokens)
   if (!apiConfig?.skipAllAuthentication) {
     addPreRouteMiddleware(_protectedMiddleware)
+  }
+
+  host.addCrossLayerPropMiddleware(addUserToCrossLayerProps)
+
+  if (!apiConfig?.authorization?.skipAllAuthorization) {
+    host.addPreRouteMiddleware(authorizationMiddleware(context))
   }
 
   return {
