@@ -121,9 +121,10 @@ export const create = (
           .catch(() => undefined)
   }
 
-  const loginRequestSchema =
-    context.config[AuthNamespace.Api]?.authentication?.loginPropsSchema ??
-    DefaultLoginRequestSchema
+  /** ZodTypeAny avoids TS2589 (excessively deep instantiation) at safeParse inside annotatedFunction. */
+  const loginRequestSchema: z.ZodTypeAny = (context.config[AuthNamespace.Api]
+    ?.authentication?.loginPropsSchema ??
+    DefaultLoginRequestSchema) as z.ZodTypeAny
 
   const login = annotatedFunction(
     LoginSchema,
@@ -132,7 +133,9 @@ export const create = (
       return Promise.resolve()
         .then(async () => {
           const unpacked = _getUnpacked()
-          const parsedLoginRequest = loginRequestSchema.safeParse(props.request)
+          const parsedLoginRequest = loginRequestSchema.safeParse(
+            props.request as unknown
+          )
           if (!parsedLoginRequest.success) {
             const endedAt = new Date().toISOString()
             await _saveLoginAttempt(
