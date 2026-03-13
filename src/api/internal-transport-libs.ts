@@ -80,7 +80,7 @@ export const toUnauthorized = (details?: unknown) =>
 export const createProtectedMiddleware =
   (
     unprotectedRoutes: ReadonlyArray<{ path: string; method: string }>,
-    authenticate: (token: string) => Promise<Response<User | JsonObj>>
+    authenticate: (token: string) => Promise<Response<User | void>>
   ): ApiMiddleware =>
   async (req, res, next) => {
     const reqPath = req.path
@@ -154,7 +154,7 @@ const _ensureAuthorizedRequest = async (
   req: Parameters<ApiMiddleware>[0],
   res: Parameters<ApiMiddleware>[1],
   next: Parameters<ApiMiddleware>[2],
-  authenticate: (token: string) => Promise<Response<User | JsonObj>>
+  authenticate: (token: string) => Promise<Response<User | void>>
 ): Promise<void> => {
   const token = getBearerToken(
     getAuthorizationHeader(req.headers.authorization)
