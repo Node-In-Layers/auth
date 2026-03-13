@@ -58,7 +58,9 @@ describe('/src/api/internal-libs.ts', () => {
       })
 
       const apiConfig = {
-        loginApproaches: ['authDomain.login'],
+        authentication: {
+          loginApproaches: ['authDomain.login'],
+        },
       }
 
       const context = {
@@ -97,7 +99,9 @@ describe('/src/api/internal-libs.ts', () => {
       const context = {
         config: {
           [AuthNamespace.Api]: {
-            loginApproaches: ['missingDomain.login'],
+            authentication: {
+              loginApproaches: ['missingDomain.login'],
+            },
           },
         },
         services,
@@ -127,7 +131,9 @@ describe('/src/api/internal-libs.ts', () => {
       const context = {
         config: {
           [AuthNamespace.Api]: {
-            loginApproaches: ['authDomain.missingFn'],
+            authentication: {
+              loginApproaches: ['authDomain.missingFn'],
+            },
           },
         },
         services,
@@ -164,21 +170,22 @@ describe('/src/api/internal-libs.ts', () => {
 
   describe('#requirePasswordHashSecretKey()', () => {
     it('should return the configured secret key', () => {
-      const apiConfig = {
+      const authentication = {
+        loginApproaches: [] as string[],
         passwordHashSecretKey: 'secret-key',
       } as any
 
-      const actual = requirePasswordHashSecretKey(apiConfig)
+      const actual = requirePasswordHashSecretKey(authentication)
       const expected = 'secret-key'
 
       assert.equal(actual, expected)
     })
 
     it('should throw when secret key is not configured', () => {
-      const apiConfig = {} as any
+      const authentication = { loginApproaches: [] as string[] } as any
 
       assert.throws(() => {
-        requirePasswordHashSecretKey(apiConfig)
+        requirePasswordHashSecretKey(authentication)
       }, /passwordHashSecretKey is required/)
     })
   })

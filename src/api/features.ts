@@ -103,7 +103,8 @@ export const create = (
     userId?: string | number
   ): Promise<void> => {
     const unpacked = _getUnpacked()
-    return unpacked.apiConfig.noSaveLoginAttempts || !LoginAttempts
+    return unpacked.apiConfig.authentication.noSaveLoginAttempts ||
+      !LoginAttempts
       ? Promise.resolve()
       : Promise.resolve(
           LoginAttempts.create<'id'>({
@@ -121,7 +122,7 @@ export const create = (
   }
 
   const loginRequestSchema =
-    context.config[AuthNamespace.Api]?.loginPropsSchema ??
+    context.config[AuthNamespace.Api]?.authentication?.loginPropsSchema ??
     DefaultLoginRequestSchema
 
   const login = annotatedFunction(
@@ -267,7 +268,7 @@ export const create = (
             })
         })
         .catch((jwksErr: unknown) =>
-          apiConfig.jwtSecret
+          apiConfig?.authentication?.jwtSecret
             ? tryLocalJwt().catch(() => Promise.reject(jwksErr))
             : Promise.reject(jwksErr)
         )

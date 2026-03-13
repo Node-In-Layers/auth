@@ -69,25 +69,29 @@ export const create = (context: _ExpressContext): ApiExpress => {
       host.addPreRouteMiddleware(middleware)
     }
 
-  const loginHandler = createLoginHandler(
-    context.features[AuthNamespace.Api].login
-  )
-  const refreshHandler = createRefreshHandler(
-    context.features[AuthNamespace.Api].refresh
-  )
+  const oauthPassthrough = apiConfig?.authentication?.oauthPassthrough?.enabled
+  const authn = apiConfig?.authentication
 
-  addUnprotectedRoute(
-    apiConfig?.loginPath || DEFAULT_LOGIN_PATH,
-    apiConfig?.loginMethod || DEFAULT_LOGIN_METHOD,
-    loginHandler
-  )
-  addUnprotectedRoute(
-    apiConfig?.refreshPath || DEFAULT_REFRESH_PATH,
-    apiConfig?.refreshMethod || DEFAULT_REFRESH_METHOD,
-    refreshHandler
-  )
+  if (!oauthPassthrough) {
+    const loginHandler = createLoginHandler(
+      context.features[AuthNamespace.Api].login
+    )
+    const refreshHandler = createRefreshHandler(
+      context.features[AuthNamespace.Api].refresh
+    )
+    addUnprotectedRoute(
+      authn?.loginPath || DEFAULT_LOGIN_PATH,
+      authn?.loginMethod || DEFAULT_LOGIN_METHOD,
+      loginHandler
+    )
+    addUnprotectedRoute(
+      authn?.refreshPath || DEFAULT_REFRESH_PATH,
+      authn?.refreshMethod || DEFAULT_REFRESH_METHOD,
+      refreshHandler
+    )
+  }
 
-  if (!apiConfig?.skipAllAuthentication) {
+  if (!apiConfig?.authentication?.skipAllAuthentication) {
     addPreRouteMiddleware(_protectedMiddleware)
   }
 

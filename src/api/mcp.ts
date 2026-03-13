@@ -124,20 +124,21 @@ export const create = (context: _McpContext): ApiMcp => {
     const refreshHandler = createRefreshHandler(
       context.features[AuthNamespace.Api].refresh
     )
+    const authn = apiConfig?.authentication
     addUnprotectedRoute(
-      apiConfig?.loginPath || DEFAULT_LOGIN_PATH,
-      apiConfig?.loginMethod || DEFAULT_LOGIN_METHOD,
+      authn?.loginPath || DEFAULT_LOGIN_PATH,
+      authn?.loginMethod || DEFAULT_LOGIN_METHOD,
       loginHandler
     )
     addUnprotectedRoute(
-      apiConfig?.refreshPath || DEFAULT_REFRESH_PATH,
-      apiConfig?.refreshMethod || DEFAULT_REFRESH_METHOD,
+      authn?.refreshPath || DEFAULT_REFRESH_PATH,
+      authn?.refreshMethod || DEFAULT_REFRESH_METHOD,
       refreshHandler
     )
     addUnprotectedFeature(context.features[AuthNamespace.Api].login)
   }
   addProtectedFeature(context.features[AuthNamespace.Api].cleanupRefreshTokens)
-  if (!apiConfig?.skipAllAuthentication) {
+  if (!apiConfig?.authentication?.skipAllAuthentication) {
     addPreRouteMiddleware(_protectedMiddleware)
   }
 

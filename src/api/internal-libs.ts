@@ -3,7 +3,12 @@ import get from 'lodash/get.js'
 import { FeaturesContext, isErrorObject } from '@node-in-layers/core'
 import { JWTPayload } from 'jose'
 import { JsonAble, JsonObj } from 'functional-models'
-import { AuthConfig, AuthNamespace, type ApiConfig } from '../types.js'
+import {
+  AuthConfig,
+  AuthNamespace,
+  type ApiAuthenticationConfig,
+  type ApiConfig,
+} from '../types.js'
 import type { User } from '../core/types.js'
 import type { LoginApproach } from './types.js'
 
@@ -76,10 +81,10 @@ export const unpackAuthentication = (
   context: FeaturesContext<AuthConfig>
 ): _UnpackedAuth => {
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
+  const auth = apiConfig?.authentication
 
-  const passthroughOnly =
-    apiConfig?.authentication?.oauthPassthrough?.enabled === true
-  if (!apiConfig?.loginApproaches?.length && !passthroughOnly) {
+  const passthroughOnly = auth?.oauthPassthrough?.enabled === true
+  if (!auth?.loginApproaches?.length && !passthroughOnly) {
     throw new Error(
       `Auth api config not found or loginApproaches empty. Likely not included in config (${AuthNamespace.Api}).`
     )
@@ -87,7 +92,13 @@ export const unpackAuthentication = (
 
   ensureApiLoaded(context)
 
-  const approachIds = apiConfig.loginApproaches ?? []
+  if (!apiConfig) {
+    throw new Error(
+      `Auth api config not found. Likely not included in config (${AuthNamespace.Api}).`
+    )
+  }
+
+  const approachIds = auth?.loginApproaches ?? []
   return {
     apiConfig,
     loginApproaches: approachIds.map(id => ({
@@ -138,8 +149,10 @@ const _pbkdf2 = async (
     )
   })
 
-export const requirePasswordHashSecretKey = (apiConfig: ApiConfig): string => {
-  const secret = apiConfig.passwordHashSecretKey
+export const requirePasswordHashSecretKey = (
+  authentication: ApiAuthenticationConfig
+): string => {
+  const secret = authentication.passwordHashSecretKey
   if (!secret) {
     throw new Error(
       'auth api passwordHashSecretKey is required when password authentication is enabled'

@@ -421,12 +421,14 @@ const _createSystem = async (
         authorization: {
           skipAllAuthorization: true,
         },
-        loginApproaches: [],
-        passwordHashSecretKey: 'feature-test-password-pepper',
-        jwtSecret: 'feature-test-jwt-secret',
-        jwtIssuer: 'feature-tests',
-        jwtAudience: 'feature-tests',
-        jwtExpiresInSeconds: 5000,
+        authentication: {
+          loginApproaches: [],
+          passwordHashSecretKey: 'feature-test-password-pepper',
+          jwtSecret: 'feature-test-jwt-secret',
+          jwtIssuer: 'feature-tests',
+          jwtAudience: 'feature-tests',
+          jwtExpiresInSeconds: 5000,
+        },
       },
     } as AuthConfig,
     overrides ?? {}
@@ -539,18 +541,22 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         allowPasswordAuthentication: true,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        },
       },
     }),
   'oidc-default': async () => {
     const provider = await _ensureOidcProvider()
     const system = await _createSystem({
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.OidcAuthLogin],
-        jwksUris: [provider.jwksUri],
-        jwtIssuer: provider.issuer,
-        jwtAudience: 'feature-test-client',
-        jwtSecret: undefined,
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.OidcAuthLogin],
+          jwksUris: [provider.jwksUri],
+          jwtIssuer: provider.issuer,
+          jwtAudience: 'feature-test-client',
+          jwtSecret: undefined,
+        },
       },
     })
     // buildJwt depends on jwtSecret. In this OIDC context we purposely disable jwtSecret
@@ -563,7 +569,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
   'api-key-default': () =>
     _createSystem({
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.ApiKeyAuthLogin],
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.ApiKeyAuthLogin],
+        },
       },
     }),
   'api-key-then-basic': () =>
@@ -572,32 +580,34 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         allowPasswordAuthentication: true,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [
-          LoginApproachServiceName.ApiKeyAuthLogin,
-          LoginApproachServiceName.BasicAuthLogin,
-        ],
-        // Fallthrough tests intentionally submit both payloads.
-        // Override default XOR login schema for this context.
-        loginPropsSchema: z.object({
-          basicAuth: z
-            .object({
-              identifier: z.string(),
-              password: z.string(),
-            })
-            .optional(),
-          apiKeyAuth: z
-            .object({
-              key: z.string(),
-            })
-            .optional(),
-        }),
+        authentication: {
+          loginApproaches: [
+            LoginApproachServiceName.ApiKeyAuthLogin,
+            LoginApproachServiceName.BasicAuthLogin,
+          ],
+          loginPropsSchema: z.object({
+            basicAuth: z
+              .object({
+                identifier: z.string(),
+                password: z.string(),
+              })
+              .optional(),
+            apiKeyAuth: z
+              .object({
+                key: z.string(),
+              })
+              .optional(),
+          }),
+        },
       },
     }),
   'custom-login-default-schema': () =>
     _createSystem(
       {
         [AuthNamespace.Api]: {
-          loginApproaches: ['custom-auth.customAuthLogin'],
+          authentication: {
+            loginApproaches: ['custom-auth.customAuthLogin'],
+          },
         },
       },
       [_createCustomAuthApp()]
@@ -606,12 +616,14 @@ const _CONTEXT: Record<string, _ContextFactory> = {
     _createSystem(
       {
         [AuthNamespace.Api]: {
-          loginApproaches: ['custom-auth.customAuthLogin'],
-          loginPropsSchema: z.object({
-            customAuth: z.object({
-              customKey: z.string(),
+          authentication: {
+            loginApproaches: ['custom-auth.customAuthLogin'],
+            loginPropsSchema: z.object({
+              customAuth: z.object({
+                customKey: z.string(),
+              }),
             }),
-          }),
+          },
         },
       },
       [_createCustomAuthApp()]
@@ -624,7 +636,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
           userModel: 'custom-users.AnotherUsers',
         },
         [AuthNamespace.Api]: {
-          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          authentication: {
+            loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          },
         },
       },
       [_createCustomUsersApp()]
@@ -635,7 +649,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         allowPasswordAuthentication: true,
       },
       [AuthNamespace.Api]: {
-        loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        },
       },
     }),
   'mcp-default': () =>
@@ -645,7 +661,9 @@ const _CONTEXT: Record<string, _ContextFactory> = {
           allowPasswordAuthentication: true,
         },
         [AuthNamespace.Api]: {
-          loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          authentication: {
+            loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+          },
         },
       },
       [],
@@ -656,18 +674,18 @@ const _CONTEXT: Record<string, _ContextFactory> = {
     return _createSystem(
       {
         [AuthNamespace.Api]: {
-          loginApproaches: [],
           authentication: {
+            loginApproaches: [],
             oauthPassthrough: {
               enabled: true,
               validateMode: OAuthPassthroughValidateMode.Jwks,
               autoProvision: true,
             },
+            jwksUris: [provider.jwksUri],
+            jwtIssuer: provider.issuer,
+            jwtAudience: 'feature-test-client',
+            jwtSecret: 'feature-test-jwt-secret',
           },
-          jwksUris: [provider.jwksUri],
-          jwtIssuer: provider.issuer,
-          jwtAudience: 'feature-test-client',
-          jwtSecret: 'feature-test-jwt-secret',
         },
       },
       [_createPassthroughProbeApp()],
@@ -679,18 +697,18 @@ const _CONTEXT: Record<string, _ContextFactory> = {
     return _createSystem(
       {
         [AuthNamespace.Api]: {
-          loginApproaches: [],
           authentication: {
+            loginApproaches: [],
             oauthPassthrough: {
               enabled: true,
               validateMode: OAuthPassthroughValidateMode.Jwks,
               autoProvision: true,
             },
+            jwksUris: [provider.jwksUri],
+            jwtIssuer: provider.issuer,
+            jwtAudience: 'feature-test-client',
+            jwtSecret: 'feature-test-jwt-secret',
           },
-          jwksUris: [provider.jwksUri],
-          jwtIssuer: provider.issuer,
-          jwtAudience: 'feature-test-client',
-          jwtSecret: 'feature-test-jwt-secret',
         },
       },
       [_createPassthroughProbeApp()],
