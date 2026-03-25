@@ -1,7 +1,12 @@
 import { assert } from 'chai'
 import * as sinon from 'sinon'
 import jwt from 'jsonwebtoken'
-import { AuthNamespace, type AuthConfig } from '../../../src/types.js'
+import axios from 'axios'
+import {
+  AuthNamespace,
+  TokenExchangeClientAuth,
+  type AuthConfig,
+} from '../../../src/types.js'
 import type { ServicesContext } from '@node-in-layers/core'
 import type { User } from '../../../src/core/types.js'
 import { create as createAuthApiServices } from '../../../src/api/services.js'
@@ -39,6 +44,7 @@ const createBaseContext = (
     log: {
       getInnerLogger: () => ({
         warn: sinon.stub(),
+        debug: sinon.stub(),
       }),
     },
   } as unknown as _TestContext
@@ -315,6 +321,196 @@ describe('/src/api/services.ts', () => {
       assert.equal(createArgs.userId, 'user-1')
       assert.equal(createArgs.expiresAt, expectedExpiresAt)
       assert.equal(createArgs.ttlSeconds, expectedTtlSeconds)
+    })
+  })
+
+  describe('#exchangeAccessToken()', () => {
+    it('should throw when tokenExchange is not enabled', async () => {
+      const context = createBaseContext()
+      stubCoreModels(context)
+      const services = createAuthApiServices(context)
+
+      let thrown: unknown
+      try {
+        await services.exchangeAccessToken({ audience: 'svc-b' })
+      } catch (e) {
+        thrown = e
+      }
+      assert.match(
+        (thrown as Error)?.message ?? String(thrown),
+        /tokenExchange is not enabled/
+      )
+    })
+
+    it('should exchange using bearer from crossLayerProps and client_secret_basic', async () => {
+      const context = createBaseContext({
+        tokenExchange: {
+          enabled: true,
+          tokenEndpoint: 'https://issuer.example/token',
+          clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
+          clientId: 'cid',
+          clientSecret: 'csecret',
+          defaultAudience: 'svc-b',
+          defaultScope: 'read:things',
+        },
+      })
+      stubCoreModels(context)
+
+      const postStub = sinon.stub(axios, 'post').resolves({
+        data: {
+          access_token: 'downstream-token',
+          token_type: 'Bearer',
+          expires_in: 123,
+          scope: 'read:things',
+        },
+      } as any)
+
+      const services = createAuthApiServices(context)
+
+      const crossLayerProps: any = {
+        requestInfo: {
+          headers: {
+            Authorization: 'Bearer upstream-token',
+          },
+        },
+      }
+
+      const actual = await services.exchangeAccessToken(
+        { audience: 'svc-b' },
+        crossLayerProps
+      )
+
+      assert.deepEqual(actual, {
+        accessToken: 'downstream-token',
+        tokenType: 'Bearer',
+        expiresInSeconds: 123,
+        scope: 'read:things',
+      })
+
+      assert.isTrue(postStub.calledOnce)
+      const [url, body, opts] = postStub.firstCall.args
+      assert.equal(url, 'https://issuer.example/token')
+      assert.equal(typeof body?.toString, 'function')
+      const bodyString = body.toString()
+      assert.include(
+        bodyString,
+        'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange'
+      )
+      assert.include(bodyString, 'subject_token=upstream-token')
+      assert.include(bodyString, 'audience=svc-b')
+      assert.include(bodyString, 'scope=read%3Athings')
+      assert.match(opts.headers.Authorization, /^Basic\s+/)
+    })
+
+    it('should include client credentials in form when client_secret_post is used', async () => {
+      const context = createBaseContext({
+        tokenExchange: {
+          enabled: true,
+          tokenEndpoint: 'https://issuer.example/token',
+          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+          clientId: 'cid',
+          clientSecret: 'csecret',
+        },
+      })
+      stubCoreModels(context)
+
+      const postStub = sinon.stub(axios, 'post').resolves({
+        data: {
+          access_token: 'downstream-token',
+        },
+      } as any)
+
+      const services = createAuthApiServices(context)
+
+      const actual = await services.exchangeAccessToken({
+        subjectToken: 'upstream-token',
+        audience: 'svc-b',
+        scope: 'read:things',
+      })
+
+      assert.deepEqual(actual, {
+        accessToken: 'downstream-token',
+        tokenType: undefined,
+        expiresInSeconds: undefined,
+        scope: undefined,
+      })
+
+      assert.isTrue(postStub.calledOnce)
+      const [_url, body] = postStub.firstCall.args
+      const bodyString = body.toString()
+      assert.include(bodyString, 'client_id=cid')
+      assert.include(bodyString, 'client_secret=csecret')
+    })
+
+    it('should apply target overrides for audience/scope and extraParams', async () => {
+      const context = createBaseContext({
+        tokenExchange: {
+          enabled: true,
+          tokenEndpoint: 'https://issuer.example/token',
+          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+          clientId: 'cid',
+          clientSecret: 'csecret',
+          defaultScope: 'default',
+          extraParams: { global: '1' },
+          targets: {
+            files: {
+              audience: 'files-svc',
+              scope: 'files:read',
+              extraParams: { target: '1' },
+            },
+          },
+        },
+      })
+      stubCoreModels(context)
+
+      const postStub = sinon.stub(axios, 'post').resolves({
+        data: { access_token: 'downstream-token' },
+      } as any)
+
+      const services = createAuthApiServices(context)
+
+      await services.exchangeAccessToken({
+        target: 'files',
+        subjectToken: 'upstream-token',
+        extraParams: { req: '1' },
+      })
+
+      assert.isTrue(postStub.calledOnce)
+      const [_url, body] = postStub.firstCall.args
+      const bodyString = body.toString()
+      assert.include(bodyString, 'audience=files-svc')
+      assert.include(bodyString, 'scope=files%3Aread')
+      assert.include(bodyString, 'global=1')
+      assert.include(bodyString, 'target=1')
+      assert.include(bodyString, 'req=1')
+    })
+  })
+
+  describe('#getOnBehalfOfHttpClient()', () => {
+    it('should return axios instance with downstream bearer', async () => {
+      const context = createBaseContext({
+        tokenExchange: {
+          enabled: true,
+          tokenEndpoint: 'https://issuer.example/token',
+          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+          clientId: 'cid',
+          clientSecret: 'csecret',
+        },
+      })
+      stubCoreModels(context)
+
+      sinon.stub(axios, 'post').resolves({
+        data: { access_token: 'downstream-token' },
+      } as any)
+
+      const createStub = sinon.stub(axios, 'create').returns({} as any)
+
+      const services = createAuthApiServices(context)
+      await services.getOnBehalfOfHttpClient({ subjectToken: 'upstream-token' })
+
+      assert.isTrue(createStub.calledOnce)
+      const [opts] = createStub.firstCall.args
+      assert.equal(opts.headers.Authorization, 'Bearer downstream-token')
     })
   })
 })

@@ -8,9 +8,14 @@ import {
   AuthNamespace,
   type ApiAuthenticationConfig,
   type ApiConfig,
+  TokenExchangeClientAuth,
 } from '../types.js'
 import type { User } from '../core/types.js'
-import type { LoginApproach } from './types.js'
+import type {
+  LoginApproach,
+  TokenExchangeRequest,
+  TokenExchangeResult,
+} from './types.js'
 
 type _ResolvedLoginApproach = Readonly<{
   loginApproach: string
@@ -250,4 +255,207 @@ export const getHeaders = (crossLayerProps: any): Record<string, string> => {
     }
   }
   return {}
+}
+
+/** Bearer value from an `Authorization` header, or undefined if not Bearer. */
+export const getBearerFromAuthorization = (
+  authorization?: string
+): string | undefined => {
+  if (!authorization) {
+    return undefined
+  }
+  const [scheme, token] = authorization.trim().split(/\s+/u, 2)
+  if (!scheme || !token || scheme.toLowerCase() !== 'bearer') {
+    return undefined
+  }
+  return token
+}
+
+type _TokenExchangeConfig = NonNullable<
+  ApiAuthenticationConfig['tokenExchange']
+>
+
+type _TokenExchangeTargetConfig = NonNullable<
+  _TokenExchangeConfig['targets']
+>[string]
+
+export const requireEnabledTokenExchange = (
+  authentication: ApiAuthenticationConfig
+): _TokenExchangeConfig => {
+  const tokenExchange = authentication.tokenExchange
+  if (!tokenExchange?.enabled) {
+    throw new Error('tokenExchange is not enabled')
+  }
+  return tokenExchange
+}
+
+export const resolveTokenExchangeTarget = (
+  tokenExchange: _TokenExchangeConfig,
+  targetName?: string
+): Readonly<{ target: _TokenExchangeTargetConfig | undefined }> => {
+  const target = targetName ? tokenExchange.targets?.[targetName] : undefined
+  if (targetName && !target) {
+    throw new Error(`tokenExchange target not found: "${targetName}"`)
+  }
+  return { target }
+}
+
+export const resolveTokenExchangeTokenEndpoint = (
+  props: TokenExchangeRequest | undefined,
+  target: _TokenExchangeTargetConfig | undefined,
+  tokenExchange: _TokenExchangeConfig
+): string => {
+  const tokenEndpoint =
+    props?.tokenEndpoint ?? target?.tokenEndpoint ?? tokenExchange.tokenEndpoint
+  if (!tokenEndpoint) {
+    throw new Error('tokenExchange.tokenEndpoint is required')
+  }
+  return tokenEndpoint
+}
+
+export const resolveTokenExchangeSubjectToken = (
+  props: TokenExchangeRequest | undefined,
+  authorizationHeader: string | undefined
+): string => {
+  const subjectToken =
+    props?.subjectToken ?? getBearerFromAuthorization(authorizationHeader)
+  if (!subjectToken) {
+    throw new Error(
+      'tokenExchange requires a subject token (props.subjectToken or incoming Authorization bearer)'
+    )
+  }
+  return subjectToken
+}
+
+export const resolveTokenExchangeAudienceResourceScope = (
+  props: TokenExchangeRequest | undefined,
+  target: _TokenExchangeTargetConfig | undefined,
+  tokenExchange: _TokenExchangeConfig
+): Readonly<{ audience?: string; resource?: string; scope?: string }> => ({
+  audience:
+    props?.audience ?? target?.audience ?? tokenExchange.defaultAudience,
+  resource:
+    props?.resource ?? target?.resource ?? tokenExchange.defaultResource,
+  scope: props?.scope ?? target?.scope ?? tokenExchange.defaultScope,
+})
+
+export const mergeTokenExchangeExtraParams = (
+  tokenExchange: _TokenExchangeConfig,
+  target: _TokenExchangeTargetConfig | undefined,
+  props: TokenExchangeRequest | undefined
+): Readonly<Record<string, string>> => ({
+  ...(tokenExchange.extraParams ?? {}),
+  ...(target?.extraParams ?? {}),
+  ...(props?.extraParams ?? {}),
+})
+
+export const requireTokenExchangeClientCredentials = (
+  tokenExchange: _TokenExchangeConfig
+): Readonly<{
+  clientId: string
+  clientSecret: string
+  clientAuth: TokenExchangeClientAuth
+}> => {
+  const clientAuth =
+    tokenExchange.clientAuth ?? TokenExchangeClientAuth.ClientSecretBasic
+  const clientId = tokenExchange.clientId
+  const clientSecret = tokenExchange.clientSecret
+  if (!clientId) {
+    throw new Error('tokenExchange.clientId is required')
+  }
+  if (!clientSecret) {
+    throw new Error('tokenExchange.clientSecret is required')
+  }
+  return { clientId, clientSecret, clientAuth }
+}
+
+export const buildTokenExchangeFormEntries = (
+  input: Readonly<{
+    subjectToken: string
+    audience?: string
+    resource?: string
+    scope?: string
+    extraParams: Readonly<Record<string, string>>
+    clientAuth: TokenExchangeClientAuth
+    clientId: string
+    clientSecret: string
+  }>
+): ReadonlyArray<readonly [string, string]> => {
+  const base: ReadonlyArray<readonly [string, string]> = [
+    ['grant_type', 'urn:ietf:params:oauth:grant-type:token-exchange'],
+    ['subject_token', input.subjectToken],
+    ['subject_token_type', 'urn:ietf:params:oauth:token-type:access_token'],
+  ]
+  const audience = input.audience
+    ? ([['audience', input.audience]] as const)
+    : ([] as const)
+  const resource = input.resource
+    ? ([['resource', input.resource]] as const)
+    : ([] as const)
+  const scope = input.scope
+    ? ([['scope', input.scope]] as const)
+    : ([] as const)
+  const extraParamEntries = Object.entries(input.extraParams)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    .map(([k, v]) => [k, v] as const)
+  const clientSecretPost =
+    input.clientAuth === TokenExchangeClientAuth.ClientSecretPost
+      ? ([
+          ['client_id', input.clientId],
+          ['client_secret', input.clientSecret],
+        ] as const)
+      : ([] as const)
+  return [
+    ...base,
+    ...audience,
+    ...resource,
+    ...scope,
+    ...extraParamEntries,
+    ...clientSecretPost,
+  ]
+}
+
+export const buildTokenExchangeRequestHeaders = (
+  clientAuth: TokenExchangeClientAuth,
+  clientId: string,
+  clientSecret: string
+): Record<string, string> => {
+  const contentType: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  }
+  if (clientAuth === TokenExchangeClientAuth.ClientSecretBasic) {
+    return {
+      ...contentType,
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+    }
+  }
+  if (clientAuth === TokenExchangeClientAuth.ClientSecretPost) {
+    return contentType
+  }
+  throw new Error(`Unsupported tokenExchange.clientAuth: ${clientAuth}`)
+}
+
+export const encodeTokenExchangeFormAsUrlSearchParams = (
+  entries: ReadonlyArray<readonly [string, string]>
+): URLSearchParams => new URLSearchParams(entries as [string, string][])
+
+export const parseTokenExchangeResponseData = (
+  data: unknown
+): TokenExchangeResult => {
+  const d = data as Record<string, unknown>
+  const accessToken =
+    typeof d?.access_token === 'string' ? d.access_token : undefined
+  if (!accessToken) {
+    throw new Error('token exchange response missing access_token')
+  }
+  const expiresInSeconds =
+    typeof d?.expires_in === 'number' ? d.expires_in : undefined
+  const tokenType = typeof d?.token_type === 'string' ? d.token_type : undefined
+  const resultScope = typeof d?.scope === 'string' ? d.scope : undefined
+  return {
+    accessToken,
+    tokenType,
+    expiresInSeconds,
+    scope: resultScope,
+  }
 }

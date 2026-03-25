@@ -33,8 +33,19 @@ import type {
 } from '../core/types.js'
 import { parseCustomUserModelReference } from './libs.js'
 import {
+  buildTokenExchangeFormEntries,
+  buildTokenExchangeRequestHeaders,
+  encodeTokenExchangeFormAsUrlSearchParams,
   getUserFromPayload,
+  mergeTokenExchangeExtraParams,
+  parseTokenExchangeResponseData,
+  requireEnabledTokenExchange,
   requirePasswordHashSecretKey,
+  requireTokenExchangeClientCredentials,
+  resolveTokenExchangeAudienceResourceScope,
+  resolveTokenExchangeSubjectToken,
+  resolveTokenExchangeTarget,
+  resolveTokenExchangeTokenEndpoint,
   verifyPasswordHash,
   type _JwtPayload,
   getHeaders,
@@ -181,7 +192,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   if (!coreConfig) {
     throw new Error(`${AuthNamespace.Core} configuration not found`)
   }
-  const auth = apiConfig.authentication
+  const authConfig = apiConfig.authentication
 
   const UserAuthIdentities = getModel<UserAuthIdentity>(
     context,
@@ -198,7 +209,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   const refreshTokenPrimaryKeyName =
     RefreshTokens.getModelDefinition().primaryKeyName
   const passwordHashSecretKey = coreConfig.allowPasswordAuthentication
-    ? requirePasswordHashSecretKey(auth)
+    ? requirePasswordHashSecretKey(authConfig)
     : undefined
 
   const getUserCruds = <
@@ -256,7 +267,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     identifier: string
   ): Promise<User | undefined> => {
     const Users = getUserCruds<User>()
-    const configured = auth.basicAuthIdentifiers
+    const configured = authConfig.basicAuthIdentifiers
     const keys: ReadonlyArray<'email' | 'username'> =
       configured && configured.length ? configured : ['email', 'username']
     if (!keys.length) {
@@ -275,8 +286,8 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   const _parseOidcIdentifiers = (
     payload: _JwtPayload
   ): OidcUserLookupIdentifiers => {
-    const parsed = auth.parseOidcPayloadIdentifiers
-      ? auth.parseOidcPayloadIdentifiers(payload as unknown as JsonObj)
+    const parsed = authConfig.parseOidcPayloadIdentifiers
+      ? authConfig.parseOidcPayloadIdentifiers(payload as unknown as JsonObj)
       : {
           sub: typeof payload.sub === 'string' ? payload.sub : undefined,
           iss: typeof payload.iss === 'string' ? payload.iss : undefined,
@@ -308,7 +319,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     if (!bySub || !byIss) {
       throw new Error('OAuth passthrough autoProvision requires sub and iss')
     }
-    const map = auth.oauthPassthrough?.claimMapping ?? {}
+    const map = authConfig.oauthPassthrough?.claimMapping ?? {}
     const email = _normalizeIdentifier(
       _claimString(
         payload,
@@ -417,25 +428,25 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   }
 
   const buildJwt: ApiServices['buildJwt'] = (user: User) => {
-    const jwtSecret = auth.jwtSecret
+    const jwtSecret = authConfig.jwtSecret
     if (!jwtSecret) {
       throw new Error('auth api jwtSecret is required to build jwt')
     }
-    if (!auth.jwtIssuer) {
+    if (!authConfig.jwtIssuer) {
       throw new Error('auth api jwtIssuer is required to build jwt')
     }
-    if (!auth.jwtAudience) {
+    if (!authConfig.jwtAudience) {
       throw new Error('auth api jwtAudience is required to build jwt')
     }
-    if (!auth.jwtExpiresInSeconds) {
+    if (!authConfig.jwtExpiresInSeconds) {
       throw new Error('auth api jwtExpiresInSeconds is required to build jwt')
     }
     const token = jwt.sign({ user }, jwtSecret, {
-      issuer: auth.jwtIssuer,
-      audience: auth.jwtAudience,
-      expiresIn: auth.jwtExpiresInSeconds,
+      issuer: authConfig.jwtIssuer,
+      audience: authConfig.jwtAudience,
+      expiresIn: authConfig.jwtExpiresInSeconds,
       algorithm:
-        (auth.jwtAlgorithms?.[0] as jwt.Algorithm | undefined) ?? 'HS256',
+        (authConfig.jwtAlgorithms?.[0] as jwt.Algorithm | undefined) ?? 'HS256',
     })
     return { token }
   }
@@ -444,7 +455,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     user: User
   ) => {
     const token = randomUUID()
-    const refreshTokenSettings = getRefreshTokenSettings(auth)
+    const refreshTokenSettings = getRefreshTokenSettings(authConfig)
     const ttlSeconds =
       refreshTokenSettings.ttlDays *
       HOURS_PER_DAY *
@@ -464,7 +475,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
 
   const cleanupRefreshTokens: ApiServices['cleanupRefreshTokens'] =
     async () => {
-      const refreshTokenSettings = getRefreshTokenSettings(auth)
+      const refreshTokenSettings = getRefreshTokenSettings(authConfig)
       const cleanUpBefore = new Date(
         _nowMillis() -
           refreshTokenSettings.ttlDays *
@@ -527,18 +538,18 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   }
 
   const validateJwt: ApiServices['validateJwt'] = async (token: string) => {
-    if (auth.jwtSecret) {
-      const payload = await verifyWithSecret(token, auth)
+    if (authConfig.jwtSecret) {
+      const payload = await verifyWithSecret(token, authConfig)
       return getUserFromPayload(payload)
     }
-    const payload = await verifyTokenPayload(token, auth)
+    const payload = await verifyTokenPayload(token, authConfig)
     return getUserFromPayload(payload)
   }
 
   const verifyJwtWithJwks: ApiServices['verifyJwtWithJwks'] = async (
     token: string
   ) => {
-    const payload = await verifyWithJwks(token, auth)
+    const payload = await verifyWithJwks(token, authConfig)
     return payload as unknown as JsonObj
   }
 
@@ -601,7 +612,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     }
     return Promise.resolve()
       .then(async () => {
-        const payload = await verifyWithJwks(token, auth)
+        const payload = await verifyWithJwks(token, authConfig)
         if (!_isJwtPayload(payload)) {
           return undefined
         }
@@ -625,8 +636,84 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     })
   }
 
+  const exchangeAccessToken: ApiServices['exchangeAccessToken'] = async (
+    props,
+    crossLayerProps
+  ) => {
+    const log = context.log.getInnerLogger(
+      'exchangeAccessToken',
+      crossLayerProps
+    )
+
+    const tokenExchange = requireEnabledTokenExchange(authConfig)
+    const targetName = props?.target
+    const { target } = resolveTokenExchangeTarget(tokenExchange, targetName)
+    const tokenEndpoint = resolveTokenExchangeTokenEndpoint(
+      props,
+      target,
+      tokenExchange
+    )
+    const requestHeaders = getHeaders(crossLayerProps)
+    const subjectToken = resolveTokenExchangeSubjectToken(
+      props,
+      requestHeaders.Authorization
+    )
+    const { audience, resource, scope } =
+      resolveTokenExchangeAudienceResourceScope(props, target, tokenExchange)
+    const extraParams = mergeTokenExchangeExtraParams(
+      tokenExchange,
+      target,
+      props
+    )
+    const { clientId, clientSecret, clientAuth } =
+      requireTokenExchangeClientCredentials(tokenExchange)
+    const formEntries = buildTokenExchangeFormEntries({
+      subjectToken,
+      audience,
+      resource,
+      scope,
+      extraParams,
+      clientAuth,
+      clientId,
+      clientSecret,
+    })
+    const headers = buildTokenExchangeRequestHeaders(
+      clientAuth,
+      clientId,
+      clientSecret
+    )
+    const form = encodeTokenExchangeFormAsUrlSearchParams(formEntries)
+
+    log.debug('Exchanging access token', {
+      target: targetName,
+      tokenEndpoint,
+      hasAudience: Boolean(audience),
+      hasResource: Boolean(resource),
+      hasScope: Boolean(scope),
+    })
+
+    const response = await axios.post(tokenEndpoint, form, {
+      headers,
+      timeout: 60_000,
+    })
+    return parseTokenExchangeResponseData(response?.data)
+  }
+
+  const getOnBehalfOfHttpClient: ApiServices['getOnBehalfOfHttpClient'] =
+    async (props, crossLayerProps) => {
+      const exchanged = await exchangeAccessToken(props, crossLayerProps)
+      return axios.create({
+        insecureHTTPParser: true,
+        headers: {
+          Authorization: `Bearer ${exchanged.accessToken}`,
+        },
+      })
+    }
+
   return {
     getPassthroughHttpClient,
+    exchangeAccessToken,
+    getOnBehalfOfHttpClient,
     buildJwt,
     buildRefreshToken,
     cleanupRefreshTokens,

@@ -89,6 +89,38 @@ export type RefreshResult = Readonly<{
 }>
 
 /**
+ * RFC 8693 token exchange options. Use either `target` (named config) or direct params.
+ * @interface
+ */
+export type TokenExchangeRequest = Readonly<{
+  /** Optional named target (maps to config `authentication.tokenExchange.targets`). */
+  target?: string
+  /** Optional override for the token endpoint; otherwise uses config/defaults. */
+  tokenEndpoint?: string
+  /** Downstream audience (recommended for service-to-service boundaries). */
+  audience?: string
+  /** Downstream resource (alternative to audience; depends on AS). */
+  resource?: string
+  /** Space-delimited scopes for downstream service. */
+  scope?: string
+  /** Explicit subject token; if absent, uses incoming Authorization bearer in crossLayerProps. */
+  subjectToken?: string
+  /** Extra form params to append. */
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+/**
+ * RFC 8693 token exchange result.
+ * @interface
+ */
+export type TokenExchangeResult = Readonly<{
+  accessToken: string
+  tokenType?: string
+  expiresInSeconds?: number
+  scope?: string
+}>
+
+/**
  * Result of cleanupRefreshTokens: number of expired refresh tokens deleted.
  * @interface
  */
@@ -110,6 +142,12 @@ export type LoginApproach<T extends JsonObj = JsonObj> = LayerFunction<
  */
 export type ApiServices = Readonly<{
   getPassthroughHttpClient: (crossLayerProps: CrossLayerProps) => AxiosInstance
+  exchangeAccessToken: LayerFunction<
+    (props?: TokenExchangeRequest) => Promise<TokenExchangeResult>
+  >
+  getOnBehalfOfHttpClient: LayerFunction<
+    (props?: TokenExchangeRequest) => Promise<AxiosInstance>
+  >
   buildJwt: LayerFunction<(user: User) => SystemJwt>
   buildRefreshToken: LayerFunction<(user: User) => Promise<RefreshTokenResult>>
   cleanupRefreshTokens: LayerFunction<() => Promise<CleanupRefreshTokensResult>>

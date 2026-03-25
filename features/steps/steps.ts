@@ -27,7 +27,10 @@ import {
   AuthNamespace,
   LoginApproachServiceName,
 } from '../../src'
-import { OAuthPassthroughValidateMode } from '../../src/types.js'
+import {
+  OAuthPassthroughValidateMode,
+  TokenExchangeClientAuth,
+} from '../../src/types.js'
 import { DataConfig, DataNamespace } from '@node-in-layers/data/types'
 import {
   createMcpResponse,
@@ -43,7 +46,13 @@ import {
   LastModifiedDateProperty,
 } from 'functional-models'
 import { User, ApiKey } from '../../src/core/types'
-import { GenericContainer, StartedTestContainer, Wait } from 'testcontainers'
+import {
+  GenericContainer,
+  Network,
+  StartedNetwork,
+  StartedTestContainer,
+  Wait,
+} from 'testcontainers'
 import { create as createMcpAuth } from '../../src/api/mcp'
 import { create as createExpressAuth } from '../../src/api/express'
 import { z } from 'zod'
@@ -56,6 +65,15 @@ type _World = {
   mcpState?: _McpState
   expressState?: _ExpressState
   expectedAuthorization?: string
+  /** Subject token (e.g. Dex password-grant access token) for RFC 8693 scenarios */
+  subjectToken?: string
+  /** Result of `exchangeAccessToken` */
+  exchangeResult?: {
+    accessToken: string
+    tokenType?: string
+    expiresInSeconds?: number
+    scope?: string
+  }
 }
 
 type _ContextFactory = () => Promise<any>
@@ -97,6 +115,146 @@ const _OIDC_SUB = 'oidc-sub-123'
 let _oidcProvider: _OidcProvider | undefined
 let _oidcTokenCache: string | undefined
 let _oidcTokenSubCache: string | undefined
+
+type _TokenExchangeDexProvider = {
+  network: StartedNetwork
+  upstreamContainer: StartedTestContainer
+  exchangeContainer: StartedTestContainer
+  /** Password-grant tokens (subject) come from upstream; iss matches upstream issuer. */
+  passwordTokenEndpoint: string
+  /** RFC 8693 against the exchange Dex. */
+  tokenEndpoint: string
+  /** Issuer on tokens minted by the exchange Dex (assert on exchanged JWT `iss`). */
+  issuer: string
+}
+
+/** Two Dex containers: upstream (password grant only) + exchange (RFC 8693 + OIDC→upstream). */
+let _tokenExchangeDexProvider: _TokenExchangeDexProvider | undefined
+
+/** Set `CUCUMBER_TOKEN_EXCHANGE_DEBUG=1` to see where time goes (Dex is before loadSystem). */
+const _logTokenExchangeDebug = (...args: unknown[]) => {
+  if (process.env.CUCUMBER_TOKEN_EXCHANGE_DEBUG) {
+    console.error('[token-exchange]', ...args)
+  }
+}
+
+const _ensureTokenExchangeDex =
+  async (): Promise<_TokenExchangeDexProvider> => {
+    if (_tokenExchangeDexProvider) {
+      _logTokenExchangeDebug('reusing existing Dex containers')
+      return _tokenExchangeDexProvider
+    }
+    _logTokenExchangeDebug(
+      'starting Dex pair via Testcontainers (upstream then exchange; not loadSystem)'
+    )
+    // Dex opens OIDC connectors during server.NewServer() *before* Listen(). A connector
+    // whose issuer is this same Dex therefore GETs discovery while nothing listens yet
+    // ("connection refused") and the process exits — HTTP wait then hangs forever.
+    // Split: upstream Dex serves discovery/JWKS; exchange Dex has OIDC connector → upstream.
+    const upstreamIssuer = 'http://oidc-upstream:5556/dex'
+    const exchangeIssuer = 'http://127.0.0.1:5556/dex'
+    const staticBlock = `
+staticClients:
+  - id: feature-test-client
+    secret: feature-test-client-secret
+    name: Feature Test Client
+    redirectURIs:
+      - http://localhost/callback
+  - id: exchange-client
+    secret: exchange-client-secret
+    name: Token Exchange Client
+    public: true
+staticPasswords:
+  - email: "admin@example.com"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: "admin"
+    userID: "${_OIDC_SUB}"
+`.trim()
+    const upstreamDexConfig = `
+issuer: ${upstreamIssuer}
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+enablePasswordDB: true
+${staticBlock}
+`.trim()
+    const exchangeDexConfig = `
+issuer: ${exchangeIssuer}
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+enablePasswordDB: true
+${staticBlock}
+connectors:
+  - type: oidc
+    id: oidc-self
+    name: self
+    config:
+      issuer: ${upstreamIssuer}
+      clientID: feature-test-client
+      clientSecret: feature-test-client-secret
+      redirectURI: http://localhost/callback
+      getUserInfo: true
+      scopes:
+        - openid
+        - profile
+        - email
+      userNameKey: sub
+`.trim()
+    const network = await new Network().start()
+    _logTokenExchangeDebug('starting upstream Dex …')
+    const upstreamContainer = await new GenericContainer(
+      'ghcr.io/dexidp/dex:v2.41.1'
+    )
+      .withNetwork(network)
+      .withNetworkAliases('oidc-upstream')
+      .withExposedPorts(5556)
+      .withCopyContentToContainer([
+        { content: upstreamDexConfig, target: '/etc/dex/config.yaml' },
+      ])
+      .withCommand(['dex', 'serve', '/etc/dex/config.yaml'])
+      .withWaitStrategy(
+        Wait.forHttp('/dex/.well-known/openid-configuration', 5556)
+      )
+      .withStartupTimeout(90_000)
+      .start()
+    _logTokenExchangeDebug('upstream Dex is up; starting exchange Dex …')
+    const exchangeContainer = await new GenericContainer(
+      'ghcr.io/dexidp/dex:v2.41.1'
+    )
+      .withNetwork(network)
+      .withExposedPorts(5556)
+      .withCopyContentToContainer([
+        { content: exchangeDexConfig, target: '/etc/dex/config.yaml' },
+      ])
+      .withCommand(['dex', 'serve', '/etc/dex/config.yaml'])
+      .withWaitStrategy(
+        Wait.forHttp('/dex/.well-known/openid-configuration', 5556)
+      )
+      .withStartupTimeout(90_000)
+      .start()
+    _logTokenExchangeDebug('exchange Dex is up (wait strategy passed)')
+    const host = upstreamContainer.getHost()
+    const upstreamBaseUrl = `http://${host}:${upstreamContainer.getMappedPort(5556)}`
+    const exchangeBaseUrl = `http://${host}:${exchangeContainer.getMappedPort(5556)}`
+    _tokenExchangeDexProvider = {
+      network,
+      upstreamContainer,
+      exchangeContainer,
+      passwordTokenEndpoint: `${upstreamBaseUrl}/dex/token`,
+      tokenEndpoint: `${exchangeBaseUrl}/dex/token`,
+      issuer: exchangeIssuer,
+    }
+    return _tokenExchangeDexProvider
+  }
 
 const _createMockMcp = () => {
   const expressApp = express()
@@ -714,6 +872,48 @@ const _CONTEXT: Record<string, _ContextFactory> = {
       [_createPassthroughProbeApp()],
       'rest'
     )
+  },
+  'token-exchange-dex': async () => {
+    _logTokenExchangeDebug(
+      'context token-exchange-dex: before _ensureTokenExchangeDex()'
+    )
+    const provider = await _ensureTokenExchangeDex()
+    _logTokenExchangeDebug(
+      'context token-exchange-dex: after _ensureTokenExchangeDex(), before _createSystem()',
+      provider.tokenEndpoint
+    )
+    const system = await _createSystem({
+      [AuthNamespace.Api]: {
+        authentication: {
+          loginApproaches: [],
+          passwordHashSecretKey: 'feature-test-password-pepper',
+          jwtSecret: 'feature-test-jwt-secret',
+          jwtIssuer: 'feature-tests',
+          jwtAudience: 'feature-tests',
+          jwtExpiresInSeconds: 5000,
+          tokenExchange: {
+            enabled: true,
+            tokenEndpoint: provider.tokenEndpoint,
+            clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
+            clientId: 'exchange-client',
+            clientSecret: 'exchange-client-secret',
+            defaultScope: 'openid profile email',
+            extraParams: {
+              connector_id: 'oidc-self',
+              requested_token_type:
+                'urn:ietf:params:oauth:token-type:access_token',
+            },
+            targets: {
+              secondary: {
+                clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+              },
+            },
+          },
+        },
+      },
+    })
+    _logTokenExchangeDebug('context token-exchange-dex: after _createSystem()')
+    return system
   },
 }
 
@@ -1711,10 +1911,125 @@ Then(
   }
 )
 
+When(
+  'we obtain a dex password access token for token exchange',
+  async function (this: _World) {
+    const provider = await _ensureTokenExchangeDex()
+    const body = new URLSearchParams({
+      grant_type: 'password',
+      username: 'admin@example.com',
+      password: 'password',
+      scope: 'openid profile email',
+      client_id: 'feature-test-client',
+      client_secret: 'feature-test-client-secret',
+    })
+    const response = await fetch(provider.passwordTokenEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`Dex password grant failed (${response.status}): ${text}`)
+    }
+    const json = (await response.json()) as { access_token?: string }
+    if (!json.access_token) {
+      throw new Error('Dex password response missing access_token')
+    }
+    this.subjectToken = json.access_token
+  }
+)
+
+When(
+  'we exchange the subject token for a downstream access token using api services',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    if (!this.subjectToken) {
+      throw new Error(
+        'Missing subject token. Run the dex password token step first.'
+      )
+    }
+    const api = this.context.services[AuthNamespace.Api]
+    this.exchangeResult = await api.exchangeAccessToken(
+      { subjectToken: this.subjectToken },
+      {}
+    )
+  }
+)
+
+When(
+  'we exchange using incoming Authorization bearer as subject token',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    if (!this.subjectToken) {
+      throw new Error(
+        'Missing subject token. Run the dex password token step first.'
+      )
+    }
+    const api = this.context.services[AuthNamespace.Api]
+    const crossLayerProps = {
+      requestInfo: {
+        headers: {
+          Authorization: `Bearer ${this.subjectToken}`,
+        },
+      },
+    }
+    this.exchangeResult = await api.exchangeAccessToken({}, crossLayerProps)
+  }
+)
+
+When(
+  'we exchange the subject token using named target {string}',
+  async function (this: _World, targetName: string) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    if (!this.subjectToken) {
+      throw new Error(
+        'Missing subject token. Run the dex password token step first.'
+      )
+    }
+    const api = this.context.services[AuthNamespace.Api]
+    this.exchangeResult = await api.exchangeAccessToken(
+      { target: targetName, subjectToken: this.subjectToken },
+      {}
+    )
+  }
+)
+
+Then(
+  'the token exchange result should be issued by dex',
+  async function (this: _World) {
+    const provider = await _ensureTokenExchangeDex()
+    const token = this.exchangeResult?.accessToken
+    _assert(
+      typeof token === 'string' && token.length > 0,
+      'expected non-empty access_token from token exchange'
+    )
+    const payload = decodeJwt(token!)
+    _assert(
+      payload.iss === provider.issuer,
+      `expected Dex issuer ${provider.issuer}, got ${String(payload.iss)}`
+    )
+  }
+)
+
 AfterAll(async function () {
   if (_oidcProvider) {
     await _oidcProvider.container.stop()
     _oidcProvider = undefined
+  }
+  if (_tokenExchangeDexProvider) {
+    const p = _tokenExchangeDexProvider
+    await p.exchangeContainer.stop()
+    await p.upstreamContainer.stop()
+    await p.network.stop()
+    _tokenExchangeDexProvider = undefined
   }
   _oidcTokenCache = undefined
   _oidcTokenSubCache = undefined

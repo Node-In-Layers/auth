@@ -80,6 +80,15 @@ export enum OAuthPassthroughValidateMode {
 }
 
 /**
+ * OAuth 2.0 token endpoint client authentication method.
+ * @interface
+ */
+export enum TokenExchangeClientAuth {
+  ClientSecretBasic = 'client_secret_basic',
+  ClientSecretPost = 'client_secret_post',
+}
+
+/**
  * OIDC claims used to look up or match a local user (e.g. from an ID token).
  * @interface
  */
@@ -141,6 +150,52 @@ export type ApiAuthenticationConfig = Readonly<{
       lastName?: string
       username?: string
     }>
+  }>
+  /**
+   * OAuth 2.0 Token Exchange (RFC 8693) configuration for on-behalf-of calls.
+   * Keep this IdP-agnostic; vendor-specific settings belong in the app config.
+   */
+  tokenExchange?: Readonly<{
+    enabled: boolean
+    /**
+     * OAuth 2.0 Token Endpoint for token exchange.
+     * Example (Keycloak): https://<host>/realms/<realm>/protocol/openid-connect/token
+     */
+    tokenEndpoint?: string
+    /**
+     * Client authentication method at the token endpoint.
+     * - client_secret_basic: Authorization: Basic base64(client_id:client_secret)
+     * - client_secret_post: client_id/client_secret in request body
+     */
+    clientAuth?: TokenExchangeClientAuth
+    clientId?: string
+    clientSecret?: string
+    /**
+     * Default parameters for exchanges when no per-target override is supplied.
+     * Prefer audience/resource binding per downstream service.
+     */
+    defaultAudience?: string
+    defaultResource?: string
+    defaultScope?: string
+    /**
+     * Per-target overrides. Allows exchanging tokens for N downstream services.
+     */
+    targets?: Readonly<
+      Record<
+        string,
+        Readonly<{
+          tokenEndpoint?: string
+          audience?: string
+          resource?: string
+          scope?: string
+          extraParams?: Readonly<Record<string, string>>
+        }>
+      >
+    >
+    /**
+     * Extra parameters appended to all exchanges (escape hatch).
+     */
+    extraParams?: Readonly<Record<string, string>>
   }>
 }>
 
