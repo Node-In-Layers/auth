@@ -1,6 +1,6 @@
 import get from 'lodash/get.js'
 import { Arrayable, DataValue, PropertyConfig } from 'functional-models'
-import { isRequestCrossLayerProps } from '@node-in-layers/mcp-server'
+import { isRequestCrossLayerProps } from './internal-libs.js'
 import {
   CommonContext,
   CrossLayerProps,
@@ -22,7 +22,7 @@ export const getUserPropertyOverride = <T extends Arrayable<DataValue>>(
 }
 
 export const getAuthorization = (
-  crossLayerProps: CrossLayerProps,
+  crossLayerProps: CrossLayerProps & { requestInfo?: any },
   header?: string
 ): string | undefined => {
   if (!isRequestCrossLayerProps(crossLayerProps)) {
