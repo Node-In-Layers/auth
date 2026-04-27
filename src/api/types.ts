@@ -13,7 +13,19 @@ import { annotationFunctionProps } from '@node-in-layers/core'
 import type { Request, Response as ExpressResponse } from 'express'
 import { z } from 'zod'
 import { AuthNamespace, type OidcUserLookupIdentifiers } from '../types.js'
-import { UserSchema } from '../core/types.js'
+import {
+  UserSchema,
+  BasicAuthRequestSchema,
+  ApiKeyAuthRequestSchema,
+  OidcAuthRequestSchema,
+  DefaultLoginRequestSchema,
+} from '../core/types.js'
+export {
+  BasicAuthRequestSchema,
+  ApiKeyAuthRequestSchema,
+  OidcAuthRequestSchema,
+  DefaultLoginRequestSchema,
+}
 import type {
   PolicyContext,
   PolicyEvaluationResponse,
@@ -180,46 +192,6 @@ export type ApiServices = Readonly<{
 export type ApiServicesLayer = Readonly<{
   [AuthNamespace.Api]: ApiServices
 }>
-
-export const BasicAuthRequestSchema = z.object({
-  basicAuth: z.object({
-    identifier: z.string(),
-    password: z.string(),
-  }),
-})
-
-export const ApiKeyAuthRequestSchema = z.object({
-  apiKeyAuth: z.object({
-    key: z.string(),
-  }),
-})
-
-export const OidcAuthRequestSchema = z.object({
-  oidcAuth: z.object({
-    token: z.string(),
-  }),
-})
-
-/**
- * Default request schema for login feature input.
- * Exactly one built-in login payload should be provided.
- */
-export const DefaultLoginRequestSchema = z
-  .object({
-    basicAuth: BasicAuthRequestSchema.shape.basicAuth.optional(),
-    apiKeyAuth: ApiKeyAuthRequestSchema.shape.apiKeyAuth.optional(),
-    oidcAuth: OidcAuthRequestSchema.shape.oidcAuth.optional(),
-  })
-  .refine(
-    value =>
-      [value.basicAuth, value.apiKeyAuth, value.oidcAuth].filter(
-        v => v !== undefined
-      ).length === 1,
-    {
-      message:
-        'Exactly one login payload is required: basicAuth, apiKeyAuth, or oidcAuth.',
-    }
-  )
 
 /**
  * Recursive schema for JSON-serializable values (JsonAble).

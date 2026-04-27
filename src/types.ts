@@ -120,6 +120,20 @@ export type ApiAuthenticationConfig = Readonly<{
   loginMethod?: string
   refreshPath?: string
   refreshMethod?: string
+  /**
+   * Optional client-side base url for @node-in-layers/auth/client HTTP calls.
+   * Example: https://api.example.com/auth
+   */
+  clientBaseUrl?: string
+  /**
+   * Optional default headers for @node-in-layers/auth/client HTTP calls.
+   */
+  clientHeaders?: Readonly<Record<string, string>>
+  /**
+   * Optional refresh buffer in ms used by @node-in-layers/auth/client.
+   * If token expiry is within this window, client will refresh automatically.
+   */
+  clientRefreshBufferMs?: number
   basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
   parseOidcPayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
   /** Required when core allowPasswordAuthentication is true. */

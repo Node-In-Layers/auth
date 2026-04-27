@@ -1,5 +1,5 @@
 import { CrossLayerProps, LayerFunction } from '@node-in-layers/core'
-import { PrimaryKeyType } from 'functional-models'
+import { JsonObj, PrimaryKeyType } from 'functional-models'
 import { z } from 'zod'
 import { AuthNamespace, PolicyAction } from '../types.js'
 
@@ -8,6 +8,46 @@ export type CoreAuthConfig = Readonly<{
     systemAdminCheck: number
   }
 }>
+
+export const BasicAuthRequestSchema = z.object({
+  basicAuth: z.object({
+    identifier: z.string(),
+    password: z.string(),
+  }),
+})
+
+export const ApiKeyAuthRequestSchema = z.object({
+  apiKeyAuth: z.object({
+    key: z.string(),
+  }),
+})
+
+export const OidcAuthRequestSchema = z.object({
+  oidcAuth: z.object({
+    token: z.string(),
+  }),
+})
+
+/**
+ * Default request schema for auth login payload.
+ * Exactly one built-in login payload should be provided.
+ */
+export const DefaultLoginRequestSchema = z
+  .object({
+    basicAuth: BasicAuthRequestSchema.shape.basicAuth.optional(),
+    apiKeyAuth: ApiKeyAuthRequestSchema.shape.apiKeyAuth.optional(),
+    oidcAuth: OidcAuthRequestSchema.shape.oidcAuth.optional(),
+  })
+  .refine(
+    value =>
+      [value.basicAuth, value.apiKeyAuth, value.oidcAuth].filter(
+        v => v !== undefined
+      ).length === 1,
+    {
+      message:
+        'Exactly one login payload is required: basicAuth, apiKeyAuth, or oidcAuth.',
+    }
+  ) as z.ZodType<JsonObj>
 
 /** Core auth layer services (reserved for future use). */
 export type AuthCoreServices = Readonly<{
