@@ -1,7 +1,7 @@
 import { assert } from 'chai'
 import sinon from 'sinon'
 import { ServicesContext } from '@node-in-layers/core'
-import { AxiosInstance } from 'axios'
+import axios, { AxiosInstance } from 'axios'
 import { z } from 'zod'
 import { AuthNamespace } from '../../../src/types.js'
 import { create } from '../../../src/client/services.js'
@@ -9,6 +9,10 @@ import { ClientAuthState } from '../../../src/client/types.js'
 
 describe('/src/client/services.ts', () => {
   describe('#create()', () => {
+    afterEach(() => {
+      sinon.restore()
+    })
+
     it('should login and expose auth state', async () => {
       const post = sinon.stub()
       post.resolves({
@@ -21,18 +25,14 @@ describe('/src/client/services.ts', () => {
           },
         },
       })
-      const services = create({} as ServicesContext, {
-        httpClient: {
-          post,
-        } as unknown as AxiosInstance,
-      })
+      sinon.stub(axios, 'create').returns({
+        post,
+      } as unknown as AxiosInstance)
+      const services = create({} as ServicesContext)
 
       const actual = await services.login({
-        baseUrl: 'http://localhost:3000',
-        request: {
-          oidcAuth: {
-            token: 'oidc-token',
-          },
+        oidcAuth: {
+          token: 'oidc-token',
         },
       })
       const auth = await services.getAuth()
@@ -64,24 +64,18 @@ describe('/src/client/services.ts', () => {
           },
         },
       })
-      const services = create({} as ServicesContext, {
-        httpClient: {
-          post,
-        } as unknown as AxiosInstance,
-      })
+      sinon.stub(axios, 'create').returns({
+        post,
+      } as unknown as AxiosInstance)
+      const services = create({} as ServicesContext)
 
       await services.login({
-        baseUrl: 'http://localhost:3000',
-        request: {
-          basicAuth: {
-            identifier: 'someone@example.com',
-            password: 'password',
-          },
+        basicAuth: {
+          identifier: 'someone@example.com',
+          password: 'password',
         },
       })
-      const actual = await services.refresh({
-        baseUrl: 'http://localhost:3000',
-      })
+      const actual = await services.refresh({})
       const auth = await services.getAuth()
 
       assert.equal(actual.token, 'token-2')
@@ -90,11 +84,10 @@ describe('/src/client/services.ts', () => {
     })
 
     it('should throw when refresh is called without available token', async () => {
-      const services = create({} as ServicesContext, {
-        httpClient: {
-          post: sinon.stub(),
-        } as unknown as AxiosInstance,
-      })
+      sinon.stub(axios, 'create').returns({
+        post: sinon.stub(),
+      } as unknown as AxiosInstance)
+      const services = create({} as ServicesContext)
 
       let actualError: Error | undefined
       try {
@@ -113,11 +106,10 @@ describe('/src/client/services.ts', () => {
     })
 
     it('should set and clear state manually', async () => {
-      const services = create({} as ServicesContext, {
-        httpClient: {
-          post: sinon.stub(),
-        } as unknown as AxiosInstance,
-      })
+      sinon.stub(axios, 'create').returns({
+        post: sinon.stub(),
+      } as unknown as AxiosInstance)
+      const services = create({} as ServicesContext)
       const state: ClientAuthState = {
         token: 'manual-token',
         refreshToken: 'manual-refresh',
@@ -154,17 +146,13 @@ describe('/src/client/services.ts', () => {
           },
         },
       } as ServicesContext
-      const services = create(context, {
-        httpClient: {
-          post,
-        } as unknown as AxiosInstance,
-      })
+      sinon.stub(axios, 'create').returns({
+        post,
+      } as unknown as AxiosInstance)
+      const services = create(context)
 
       const actual = await services.login({
-        baseUrl: 'http://localhost:3000',
-        request: {
-          customToken: 'abc123',
-        },
+        customToken: 'abc123',
       })
 
       assert.equal(actual.token, 'custom-token')

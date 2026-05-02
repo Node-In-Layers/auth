@@ -1,5 +1,7 @@
 import { Config, ServicesContext } from '@node-in-layers/core'
-import axios, { AxiosInstance } from 'axios'
+import axios from 'axios'
+import attempt from 'lodash/attempt.js'
+import isError from 'lodash/isError.js'
 import { AuthNamespace } from '../types.js'
 import { DefaultLoginRequestSchema } from '../core/types.js'
 import {
@@ -12,11 +14,10 @@ import {
 const defaultLoginPath = '/login'
 const defaultRefreshPath = '/token/refresh'
 const defaultAuthHeader = 'Authorization'
+const defaultAuthFormatter = (key: string) => `Bearer ${key}`
 const defaultTokenRefreshBufferMs = 60_000
-
-type _CreateDeps = Readonly<{
-  httpClient?: AxiosInstance
-}>
+const base64BlockSize = 4
+const jwtSecondsToMilliseconds = 1000
 
 type _BuildUrlProps = Readonly<{
   baseUrl: string
@@ -27,27 +28,36 @@ const _buildUrl = (props: _BuildUrlProps) => {
   const normalizedBase = props.baseUrl.endsWith('/')
     ? props.baseUrl.slice(0, -1)
     : props.baseUrl
-  const normalizedPath = props.path.startsWith('/') ? props.path : `/${props.path}`
+  const normalizedPath = props.path.startsWith('/')
+    ? props.path
+    : `/${props.path}`
   return `${normalizedBase}${normalizedPath}`
 }
 
 const _decodeBase64Url = (value: string): string | undefined => {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const normalized = value.replace(/-/gu, '+').replace(/_/gu, '/')
   const padded =
-    normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4)
+    normalized +
+    '='.repeat(
+      (base64BlockSize -
+        (normalized.length % base64BlockSize || base64BlockSize)) %
+        base64BlockSize
+    )
   if (typeof globalThis.atob === 'function') {
     return globalThis.atob(padded)
   }
-  const runtimeBuffer = (globalThis as {
-    Buffer?: {
-      from: (
-        input: string,
-        encoding: string
-      ) => {
-        toString: (encoding: string) => string
+  const runtimeBuffer = (
+    globalThis as {
+      Buffer?: {
+        from: (
+          input: string,
+          encoding: string
+        ) => {
+          toString: (encoding: string) => string
+        }
       }
     }
-  }).Buffer
+  ).Buffer
   return runtimeBuffer
     ? runtimeBuffer.from(padded, 'base64').toString('utf8')
     : undefined
@@ -62,14 +72,15 @@ const _getTokenExpiryMs = (token: string): number | undefined => {
   if (!decodedPayload) {
     return undefined
   }
-  try {
-    const parsedPayload = JSON.parse(decodedPayload) as { exp?: unknown }
-    return typeof parsedPayload.exp === 'number'
-      ? parsedPayload.exp * 1000
-      : undefined
-  } catch {
+  const parsedPayload = attempt(
+    () => JSON.parse(decodedPayload) as { exp?: unknown }
+  )
+  if (isError(parsedPayload)) {
     return undefined
   }
+  return typeof parsedPayload.exp === 'number'
+    ? parsedPayload.exp * jwtSecondsToMilliseconds
+    : undefined
 }
 
 const _isExpiredOrNearExpiry = (
@@ -82,21 +93,16 @@ const _isExpiredOrNearExpiry = (
   return Date.now() >= expiresAtMs - refreshBufferMs
 }
 
-export const create = (
-  context: ServicesContext<Config>,
-  deps?: _CreateDeps
-): ClientServices => {
+export const create = (context: ServicesContext<Config>): ClientServices => {
   const authConfig = context.config?.[AuthNamespace.Api]?.authentication
   const clientBaseUrl = authConfig?.clientBaseUrl
   const clientHeaders = authConfig?.clientHeaders
   const tokenRefreshBufferMs =
     authConfig?.clientRefreshBufferMs || defaultTokenRefreshBufferMs
-  const httpClient =
-    deps?.httpClient ||
-    axios.create({
-      ...(clientBaseUrl ? { baseURL: clientBaseUrl } : {}),
-      ...(clientHeaders ? { headers: clientHeaders } : {}),
-    })
+  const httpClient = axios.create({
+    ...(clientBaseUrl ? { baseURL: clientBaseUrl } : {}),
+    ...(clientHeaders ? { headers: clientHeaders } : {}),
+  })
   const loginRequestSchema =
     authConfig?.loginPropsSchema || DefaultLoginRequestSchema
   const loginPath = authConfig?.loginPath || defaultLoginPath
@@ -106,9 +112,7 @@ export const create = (
   // eslint-disable-next-line functional/no-let
   let refreshInFlight: Promise<ClientRefreshResult> | undefined
 
-  const _applyLoginState = (
-    result: ClientLoginResult
-  ) => {
+  const _applyLoginState = (result: ClientLoginResult) => {
     authState = {
       token: result.token,
       refreshToken: result.refreshToken,
@@ -139,7 +143,7 @@ export const create = (
         path,
       })
     }
-    if (!deps?.httpClient) {
+    if (!httpClient) {
       throw new Error(
         'Auth client requires authentication.clientBaseUrl config (or a custom httpClient).'
       )
@@ -156,14 +160,11 @@ export const create = (
         'No refresh token available. Call login first or pass refreshToken.'
       )
     }
-    const payload = {
-      request: {
-        refreshToken,
-      },
-    }
     const response = await httpClient.post<ClientRefreshResult>(
       _resolveUrl(refreshPath),
-      payload
+      {
+        refreshToken,
+      }
     )
     _applyRefreshState(response.data)
     return response.data
@@ -173,7 +174,7 @@ export const create = (
     if (refreshInFlight) {
       return refreshInFlight
     }
-    if (!clientBaseUrl && !deps?.httpClient) {
+    if (!clientBaseUrl && !httpClient) {
       throw new Error(
         'Auth client requires clientBaseUrl config (or custom httpClient) for automatic refresh.'
       )
@@ -186,31 +187,29 @@ export const create = (
     })
   }
 
-  const login = async (props) => {
+  const login = async props => {
     const parsed = loginRequestSchema.safeParse(props)
     if (!parsed.success) {
       throw new Error('Invalid login request shape for auth client login')
     }
-    const payload = {
-      request: props,
-    }
     const response = await httpClient.post<ClientLoginResult>(
       _resolveUrl(loginPath),
-      payload
+      props
     )
     _applyLoginState(response.data)
     return response.data
   }
 
-  const refresh = async (props) => {
-    return _refreshWithProps(props)
-  }
+  const refresh = _refreshWithProps
 
   const getAuth = async () => {
     if (
       authState?.refreshToken &&
       (!authState.token ||
-        _isExpiredOrNearExpiry(authState.tokenExpiresAtMs, tokenRefreshBufferMs))
+        _isExpiredOrNearExpiry(
+          authState.tokenExpiresAtMs,
+          tokenRefreshBufferMs
+        ))
     ) {
       await _refreshFromStoredState()
     }
@@ -218,7 +217,7 @@ export const create = (
       ? {
           key: authState.token,
           header: authState.header || defaultAuthHeader,
-          formatter: authState.formatter,
+          formatter: authState.formatter || defaultAuthFormatter,
         }
       : undefined
   }
@@ -251,5 +250,3 @@ export const create = (
     logout,
   }
 }
-
-

@@ -21,7 +21,11 @@ import {
 import type { JsonObj, PrimaryKeyType } from 'functional-models'
 import {
   ActionForPolicy,
+  LoginFeatureProps,
+  LoginResult,
   ResourceTypeForPolicy,
+  RefreshFeatureProps,
+  RefreshResult,
   type PolicyContext,
   type User,
 } from '../core/types.js'
@@ -31,10 +35,6 @@ import type {
   ApiProtectedRouteRegistration,
   ApiRouteHandler,
   ApiServicesLayer,
-  LoginFeatureProps,
-  LoginResult,
-  RefreshFeatureProps,
-  RefreshResult,
 } from './types.js'
 
 export const NOT_AUTHORIZED = 401
@@ -150,6 +150,24 @@ const _getMcpToolNameFromBody = (body: unknown): string | undefined => {
   return undefined
 }
 
+const _getMcpFeatureNameFromBody = (body: unknown): string | undefined => {
+  if (!_isRecord(body)) {
+    return undefined
+  }
+  const args = _isRecord(body.arguments) ? body.arguments : undefined
+  if (typeof args?.featureName === 'string') {
+    return args.featureName
+  }
+  const params = body.params
+  if (_isRecord(params)) {
+    const paramArgs = _isRecord(params.arguments) ? params.arguments : undefined
+    if (typeof paramArgs?.featureName === 'string') {
+      return paramArgs.featureName
+    }
+  }
+  return undefined
+}
+
 const _ensureAuthorizedRequest = async (
   req: Parameters<ApiMiddleware>[0],
   res: Parameters<ApiMiddleware>[1],
@@ -205,8 +223,19 @@ export const createMcpProtectedMiddleware =
       return
     }
 
+    // Streamable HTTP transports can send setup/session POSTs to the MCP root
+    // before a tool call body is available to route-specific auth checks.
+    if (!rpcMethod && reqPath === '/' && reqMethod === 'POST') {
+      next()
+      return
+    }
+
     const toolName = _getMcpToolNameFromBody(req.body)
-    if (toolName && unprotectedFeatureNames.has(toolName)) {
+    const featureName = _getMcpFeatureNameFromBody(req.body)
+    if (
+      (toolName && unprotectedFeatureNames.has(toolName)) ||
+      (featureName && unprotectedFeatureNames.has(featureName))
+    ) {
       next()
       return
     }

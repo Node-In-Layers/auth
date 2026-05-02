@@ -4,9 +4,9 @@ import {
   annotationFunctionProps,
 } from '@node-in-layers/core'
 import { JsonObj } from 'functional-models'
+import { z } from 'zod'
 import { DefaultLoginRequestSchema, User, UserSchema } from '../core/types.js'
 import { AuthNamespace } from '../types.js'
-import { z } from 'zod'
 
 export type ClientAuthResult = Readonly<{
   key: string
@@ -53,7 +53,8 @@ export type ClientRefreshResult = Readonly<{
   refreshToken: string
 }>
 
-export const ClientLoginPropsSchema = DefaultLoginRequestSchema as z.ZodType<ClientLoginProps>
+export const ClientLoginPropsSchema =
+  DefaultLoginRequestSchema as z.ZodType<ClientLoginProps>
 
 export const ClientRefreshPropsSchema = z.object({
   refreshToken: z.string().optional(),
@@ -129,5 +130,3 @@ export type ClientFeatures = Readonly<{
 export type ClientFeaturesLayer = Readonly<{
   client: ClientFeatures
 }>
-
-

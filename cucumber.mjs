@@ -8,5 +8,6 @@ export default {
     import: ['features/steps/steps.mjs'],
     publishQuiet: true,
     format: ['progress'],
+    exclude: ['features/test-mcp-server/**'],
   },
 }

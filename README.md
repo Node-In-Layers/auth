@@ -9,6 +9,69 @@ Drop in, fully featured, Authentication and Authorization library for Node In La
 
 This package contains common authentication and authorization types, models and routines. This includes important system building models such as users and organizations as well as resuable and extensible logic for doing authentication and authorization on features and model functions.
 
+## Auth + MCP Client Composition (direct import)
+
+If you want a composed client that merges:
+
+- `@node-in-layers/mcp-client` features/models client, and
+- `@node-in-layers/auth/client` features (`login`, `refresh`, `logout`, `getState`, `setState`)
+
+use the auth package's mcp-client entries helper via a **direct path import**:
+
+```typescript
+import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
+```
+
+Important:
+
+- Do **not** add `@node-in-layers/auth/mcp-client` to `apps` as a domain.
+- This is an entries helper, not a domain you register in system config.
+- Pass the MCP client config you want to use. The helper adds the auth client domain and auth adapter wiring for you.
+
+### Services layer usage
+
+```typescript
+import { ServicesContext } from '@node-in-layers/core'
+import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
+import { McpClientNamespace } from '@node-in-layers/mcp-client/types.js'
+import * as mcp from '@node-in-layers/mcp-client/mcp/index.js'
+import * as yourDomain from '../yourDomain/index.js'
+import { AppConfig } from '../types.js'
+
+export const create = (context: ServicesContext<AppConfig>) => {
+  const buildClient = async () => {
+    return createClient({
+      [McpClientNamespace.client]: {
+        ...context.config[McpClientNamespace.client],
+        domains: [mcp, yourDomain],
+      },
+    })
+  }
+
+  return {
+    buildClient,
+  }
+}
+```
+
+### Features layer usage
+
+```typescript
+import { FeaturesContext } from '@node-in-layers/core'
+import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
+import { McpClientNamespace } from '@node-in-layers/mcp-client/types.js'
+import { AppConfig } from '../types.js'
+
+export const create = (context: FeaturesContext<AppConfig, any>) => {
+  const getSdk = async () =>
+    createClient({
+      [McpClientNamespace.client]: context.config[McpClientNamespace.client],
+    })
+
+  return { getSdk }
+}
+```
+
 # Big System Features
 
 - Ability to login a User with basic auth, OIDC, or Api Keys.

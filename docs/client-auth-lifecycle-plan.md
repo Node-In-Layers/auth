@@ -50,19 +50,23 @@ Use auth API config for client transport behavior:
 ## Lifecycle
 
 1. **Login**
-   - Caller submits login payload (basic/oidc/apikey style request).
-   - Client calls auth API login route and stores returned token/refresh token/user.
+
+- Caller submits login payload (basic/oidc/apikey style request).
+- Client calls auth API login route and stores returned token/refresh token/user.
 
 2. **Steady state**
-   - Callers (including `mcp-client` through adapter) call `getAuth()`.
-   - `getAuth()` checks token expiry and uses refresh token automatically when near expiry.
+
+- Callers (including `mcp-client` through adapter) call `getAuth()`.
+- `getAuth()` checks token expiry and uses refresh token automatically when near expiry.
 
 3. **Rehydration**
-   - On app reload, caller restores session with `setState(...)`.
-   - Subsequent `getAuth()` calls continue lifecycle without forced re-login.
+
+- On app reload, caller restores session with `setState(...)`.
+- Subsequent `getAuth()` calls continue lifecycle without forced re-login.
 
 4. **Logout**
-   - Clear in-memory state and in-flight refresh state.
+
+- Clear in-memory state and in-flight refresh state.
 
 ## Refresh behavior
 

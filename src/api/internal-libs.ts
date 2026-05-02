@@ -10,12 +10,12 @@ import {
   type ApiConfig,
   TokenExchangeClientAuth,
 } from '../types.js'
-import type { User } from '../core/types.js'
 import type {
-  LoginApproach,
   TokenExchangeRequest,
   TokenExchangeResult,
-} from './types.js'
+  User,
+} from '../core/types.js'
+import type { LoginApproach } from './types.js'
 
 type _ResolvedLoginApproach = Readonly<{
   loginApproach: string

@@ -1,16 +1,18 @@
-import { annotatedFunction, Config, FeaturesContext } from '@node-in-layers/core'
+import {
+  annotatedFunction,
+  Config,
+  FeaturesContext,
+} from '@node-in-layers/core'
 import {
   ClientFeatures,
   ClientServicesLayer,
-  ClientFeaturesLayer,
   ClientLoginSchema,
   ClientRefreshSchema,
   ClientLogoutSchema,
 } from './types.js'
 
-
 export const create = (
-  context: FeaturesContext<Config, ClientServicesLayer, ClientFeaturesLayer>
+  context: FeaturesContext<Config, ClientServicesLayer>
 ): ClientFeatures => {
   const login = annotatedFunction(ClientLoginSchema, (props, crossLayerProps) =>
     context.services.client.login(props, crossLayerProps)
@@ -26,7 +28,7 @@ export const create = (
     context.services.client.logout(crossLayerProps)
   )
 
-  const getState = async (crossLayerProps) => {
+  const getState = async crossLayerProps => {
     return context.services.client.getState(crossLayerProps)
   }
 
@@ -42,5 +44,3 @@ export const create = (
     setState,
   }
 }
-
-

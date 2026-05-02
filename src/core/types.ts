@@ -1,4 +1,8 @@
-import { CrossLayerProps, LayerFunction } from '@node-in-layers/core'
+import {
+  CrossLayerProps,
+  LayerFunction,
+  annotationFunctionProps,
+} from '@node-in-layers/core'
 import { JsonObj, PrimaryKeyType } from 'functional-models'
 import { z } from 'zod'
 import { AuthNamespace, PolicyAction } from '../types.js'
@@ -387,3 +391,203 @@ export type RefreshToken = Readonly<{
 export type AuthCrossLayerProps = CrossLayerProps & {
   user?: User
 }
+
+/**
+ * System-issued JWT access token.
+ * @interface
+ */
+export type SystemJwt = Readonly<{
+  token: string
+}>
+
+/**
+ * Result of a successful login: user, access token, refresh token, and login approach used.
+ * @interface
+ */
+export type LoginResult = Readonly<{
+  user: User
+  token: string
+  refreshToken: string
+  loginApproach: string
+}>
+
+/**
+ * Input for the login feature: request payload plus optional client ip and userAgent.
+ * @interface
+ */
+export type LoginFeatureProps<T extends JsonObj = JsonObj> = Readonly<{
+  request: T
+  ip?: string
+  userAgent?: string
+}>
+
+/**
+ * Input for the refresh feature: request payload plus optional client ip and userAgent.
+ * @interface
+ */
+export type RefreshFeatureProps<T extends JsonObj = JsonObj> = Readonly<{
+  request: T
+  ip?: string
+  userAgent?: string
+}>
+
+/**
+ * Result of creating a refresh token: opaque token value, expiration, and TTL for cleanup.
+ * @interface
+ */
+export type RefreshTokenResult = Readonly<{
+  token: string
+  expiresAt: string
+  ttlSeconds: number
+}>
+
+/**
+ * Result of refreshing tokens: user, new access token, and new refresh token.
+ * @interface
+ */
+export type RefreshResult = Readonly<{
+  user: User
+  token: string
+  refreshToken: string
+}>
+
+/**
+ * RFC 8693 token exchange options. Use either `target` (named config) or direct params.
+ * @interface
+ */
+export type TokenExchangeRequest = Readonly<{
+  /** Optional named target (maps to config `authentication.tokenExchange.targets`). */
+  target?: string
+  /** Optional override for the token endpoint; otherwise uses config/defaults. */
+  tokenEndpoint?: string
+  /** Downstream audience (recommended for service-to-service boundaries). */
+  audience?: string
+  /** Downstream resource (alternative to audience; depends on AS). */
+  resource?: string
+  /** Space-delimited scopes for downstream service. */
+  scope?: string
+  /** Explicit subject token; if absent, uses incoming Authorization bearer in crossLayerProps. */
+  subjectToken?: string
+  /** Extra form params to append. */
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+/**
+ * RFC 8693 token exchange result.
+ * @interface
+ */
+export type TokenExchangeResult = Readonly<{
+  accessToken: string
+  tokenType?: string
+  expiresInSeconds?: number
+  scope?: string
+}>
+
+/**
+ * Result of cleanupRefreshTokens: number of expired refresh tokens deleted.
+ * @interface
+ */
+export type CleanupRefreshTokensResult = Readonly<{
+  deletedCount: number
+}>
+
+/** Props for the authenticate feature (JWT token). */
+export type AuthenticateProps = SystemJwt
+
+/**
+ * Recursive schema for JSON-serializable values (JsonAble).
+ * Used to build a request schema whose output type is JsonObj.
+ */
+const JsonAbleSchema = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.undefined(),
+    z.array(JsonAbleSchema),
+    z.record(z.string(), JsonAbleSchema),
+  ])
+)
+
+/** Request body schema constrained to JsonObj for LoginFeatureProps/RefreshFeatureProps. */
+export const RequestSchema = z.record(
+  z.string(),
+  JsonAbleSchema
+) as unknown as z.ZodType<JsonObj>
+
+export const LoginFeaturePropsSchema = z.object({
+  request: RequestSchema,
+  ip: z.string().optional(),
+  userAgent: z.string().optional(),
+})
+
+export const LoginResultSchema = z.object({
+  user: UserSchema,
+  token: z.string(),
+  refreshToken: z.string(),
+  loginApproach: z.string(),
+})
+
+export const LoginSchema = annotationFunctionProps<
+  LoginFeatureProps,
+  LoginResult
+>({
+  functionName: 'login',
+  domain: AuthNamespace.Api,
+  args: LoginFeaturePropsSchema,
+  returns: LoginResultSchema,
+})
+
+export const AuthenticatePropsSchema = z.object({
+  token: z.string(),
+})
+
+export const AuthenticateReturnsSchema = z.union([UserSchema, z.undefined()])
+
+export const AuthenticateSchema = annotationFunctionProps<
+  AuthenticateProps,
+  User | void
+>({
+  functionName: 'authenticate',
+  domain: AuthNamespace.Api,
+  args: AuthenticatePropsSchema,
+  returns:
+    AuthenticateReturnsSchema as z.ZodType<User | void> as z.ZodType<User>,
+})
+
+export const RefreshFeaturePropsSchema = z.object({
+  request: RequestSchema,
+  ip: z.string().optional(),
+  userAgent: z.string().optional(),
+})
+
+export const RefreshResultSchema = z.object({
+  user: UserSchema,
+  token: z.string(),
+  refreshToken: z.string(),
+})
+
+export const RefreshSchema = annotationFunctionProps<
+  RefreshFeatureProps,
+  RefreshResult
+>({
+  functionName: 'refresh',
+  domain: AuthNamespace.Api,
+  args: RefreshFeaturePropsSchema,
+  returns: RefreshResultSchema,
+})
+
+export const CleanupRefreshTokensResultSchema = z.object({
+  deletedCount: z.number(),
+})
+
+export const CleanupRefreshTokensSchema = annotationFunctionProps<
+  JsonObj,
+  CleanupRefreshTokensResult
+>({
+  functionName: 'cleanupRefreshTokens',
+  domain: AuthNamespace.Api,
+  args: z.record(z.string(), z.any()),
+  returns: CleanupRefreshTokensResultSchema,
+})

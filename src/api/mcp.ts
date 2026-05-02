@@ -26,16 +26,12 @@ import { addUserToCrossLayerProps } from './libs.js'
 
 const MCP_NAMESPACE = '@node-in-layers/mcp-server'
 
-type _McpContext = FeaturesContext<
-  Config,
-  ApiServicesLayer,
-  ApiFeaturesLayer,
-  Readonly<{ mcp?: Readonly<Record<string, unknown>> }>
->
+type _McpContext = FeaturesContext<Config, ApiServicesLayer, ApiFeaturesLayer> &
+  Readonly<{ mcp: Readonly<Record<string, unknown>> }>
 
 export const create = (context: _McpContext): ApiMcp => {
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
-  const host = context[MCP_NAMESPACE] as ApiHost & {
+  const host = context.mcp[MCP_NAMESPACE] as ApiHost & {
     addTool: (tool: ServerTool) => void
   }
 

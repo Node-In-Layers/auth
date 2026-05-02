@@ -60,6 +60,7 @@ export type PropertyFactory<
 export enum AuthNamespace {
   Core = '@node-in-layers/auth/core',
   Api = '@node-in-layers/auth/api',
+  McpClient = '@node-in-layers/auth/mcp-client',
 }
 
 /** Registered login approach service names for the API layer. */

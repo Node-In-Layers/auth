@@ -1,0 +1,15 @@
+{
+  "node-in-layers-auth-core-users": {
+    "11111111-1111-4111-8111-111111111111": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "email": "testuser@example.com",
+      "username": "testuser",
+      "firstName": "Test",
+      "lastName": "User",
+      "enabled": true,
+      "passwordHash": "pbkdf2$sha512$210000$64$HYG6hysZTLEzkuR73Zkb1w==$vPu3A3t0uTs3+O9dDX2dXaLfos2OSJ/mHldCexx/yp/n+C8nYwmqAzceDfRbT4JLe67637IarRbE39JY6NDjCA=="
+    }
+  },
+  "node-in-layers-auth-core-refresh-tokens": {},
+  "node-in-layers-auth-core-organizations": {}
+}
