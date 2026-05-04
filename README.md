@@ -354,12 +354,12 @@ type OrganizationReferenceProperty = Readonly<{
     }
     oauth?: {
       tokenEndpoint?: string
-      tokenUrl?: string
       scopes?: readonly string[]
       clientId?: string
       clientSecret?: string
       clientAuth?: 'client_secret_basic' | 'client_secret_post'
       oidc?: {
+        issuer?: string
         jwksUris: readonly string[]
         parsePayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
       }
@@ -404,7 +404,7 @@ type OrganizationReferenceProperty = Readonly<{
        */
       clientCredentials?: {
         enabled: boolean
-        tokenUrl?: string
+        tokenEndpoint?: string
         clientId?: string
         clientSecret?: string
         clientAuth?: 'client_secret_basic' | 'client_secret_post'

@@ -169,7 +169,7 @@ describe('/src/client/services.ts', () => {
           [AuthNamespace.Api]: {
             authentication: {
               oauth: {
-                tokenUrl: 'https://oauth.example/token',
+                tokenEndpoint: 'https://oauth.example/token',
                 clientId: 'oauth-client-id',
                 clientSecret: 'oauth-client-secret',
                 scopes: ['scope-a'],

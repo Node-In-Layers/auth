@@ -162,9 +162,9 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
   }
 
   const _validateClientCredentialsArgs = args => {
-    if (!args.tokenUrl) {
+    if (!args.tokenEndpoint) {
       throw new Error(
-        'oauth.clientCredentials.tokenUrl is required (or oauth.tokenUrl)'
+        'oauth.clientCredentials.tokenEndpoint is required (or oauth.tokenEndpoint)'
       )
     }
     if (!args.clientId) {
@@ -188,16 +188,19 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
     if (!oauthClientCredentials || !oauthClientCredentials.enabled) {
       return undefined
     }
-    const tokenUrl =
-      oauthClientCredentials.tokenUrl ||
-      oauthConfig?.tokenUrl ||
-      oauthConfig?.tokenEndpoint
+    const tokenEndpoint =
+      oauthClientCredentials.tokenEndpoint || oauthConfig?.tokenEndpoint
     const clientId = oauthClientCredentials.clientId || oauthConfig?.clientId
     const clientSecret =
       oauthClientCredentials.clientSecret || oauthConfig?.clientSecret
     const scopes =
       oauthClientCredentials.scopes || oauthConfig?.scopes || ([] as const)
-    _validateClientCredentialsArgs({ tokenUrl, clientId, clientSecret, scopes })
+    _validateClientCredentialsArgs({
+      tokenEndpoint,
+      clientId,
+      clientSecret,
+      scopes,
+    })
     if (
       oauthState.accessToken &&
       oauthState.expiresAtMs &&
@@ -213,7 +216,7 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
         access_token?: string
         expires_in?: number
       }>(
-        tokenUrl,
+        tokenEndpoint,
         new URLSearchParams({
           grant_type: 'client_credentials',
           client_id: clientId,

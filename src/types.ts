@@ -112,6 +112,7 @@ export type OidcUserLookupIdentifiers = Readonly<{
  * `jwksUris` is required whenever this section is provided.
  */
 export type OAuthOidcConfig = Readonly<{
+  issuer?: string
   jwksUris: readonly string[]
   parsePayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
 }>
@@ -193,7 +194,7 @@ export type OAuthClientCredentialsDisabledConfig = Readonly<{
 
 export type OAuthClientCredentialsEnabledConfig = Readonly<{
   enabled: true
-  tokenUrl?: string
+  tokenEndpoint?: string
   clientId?: string
   clientSecret?: string
   clientAuth?: TokenExchangeClientAuth
@@ -211,7 +212,6 @@ export type OAuthClientCredentialsConfig = XOR<
  */
 export type ApiAuthenticationOAuthConfig = Readonly<{
   tokenEndpoint?: string
-  tokenUrl?: string
   scopes?: readonly string[]
   clientId?: string
   clientSecret?: string
