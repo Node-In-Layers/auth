@@ -18,6 +18,8 @@ const defaultAuthFormatter = (key: string) => `Bearer ${key}`
 const defaultTokenRefreshBufferMs = 60_000
 const base64BlockSize = 4
 const jwtSecondsToMilliseconds = 1000
+const oauth2TokenExpiryBufferMs = 60_000
+const oauth2DefaultExpirySeconds = 3600
 
 type _BuildUrlProps = Readonly<{
   baseUrl: string
@@ -95,6 +97,7 @@ const _isExpiredOrNearExpiry = (
 
 export const create = (context: ServicesContext<Config>): ClientServices => {
   const authConfig = context.config?.[AuthNamespace.Api]?.authentication
+  const oauthConfig = authConfig?.oauth
   const clientBaseUrl = authConfig?.clientBaseUrl
   const clientHeaders = authConfig?.clientHeaders
   const tokenRefreshBufferMs =
@@ -107,10 +110,17 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
     authConfig?.loginPropsSchema || DefaultLoginRequestSchema
   const loginPath = authConfig?.loginPath || defaultLoginPath
   const refreshPath = authConfig?.refreshPath || defaultRefreshPath
+  const oauthClientCredentials = oauthConfig?.clientCredentials
   // eslint-disable-next-line functional/no-let
   let authState: ClientAuthState | undefined
   // eslint-disable-next-line functional/no-let
   let refreshInFlight: Promise<ClientRefreshResult> | undefined
+  // eslint-disable-next-line functional/no-let
+  let oauthState = {
+    accessToken: undefined as string | undefined,
+    expiresAtMs: undefined as number | undefined,
+    refreshPromise: undefined as Promise<string> | undefined,
+  }
 
   const _applyLoginState = (result: ClientLoginResult) => {
     authState = {
@@ -149,6 +159,103 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
       )
     }
     return path
+  }
+
+  const _validateClientCredentialsArgs = args => {
+    if (!args.tokenUrl) {
+      throw new Error(
+        'oauth.clientCredentials.tokenUrl is required (or oauth.tokenUrl)'
+      )
+    }
+    if (!args.clientId) {
+      throw new Error(
+        'oauth.clientCredentials.clientId is required (or oauth.clientId)'
+      )
+    }
+    if (!args.clientSecret) {
+      throw new Error(
+        'oauth.clientCredentials.clientSecret is required (or oauth.clientSecret)'
+      )
+    }
+    if (!args.scopes.length) {
+      throw new Error(
+        'oauth.clientCredentials.scopes is required (or oauth.scopes)'
+      )
+    }
+  }
+
+  const _getOAuthAccessToken = async (): Promise<string | undefined> => {
+    if (!oauthClientCredentials || !oauthClientCredentials.enabled) {
+      return undefined
+    }
+    const tokenUrl =
+      oauthClientCredentials.tokenUrl ||
+      oauthConfig?.tokenUrl ||
+      oauthConfig?.tokenEndpoint
+    const clientId = oauthClientCredentials.clientId || oauthConfig?.clientId
+    const clientSecret =
+      oauthClientCredentials.clientSecret || oauthConfig?.clientSecret
+    const scopes =
+      oauthClientCredentials.scopes || oauthConfig?.scopes || ([] as const)
+    _validateClientCredentialsArgs({ tokenUrl, clientId, clientSecret, scopes })
+    if (
+      oauthState.accessToken &&
+      oauthState.expiresAtMs &&
+      Date.now() < oauthState.expiresAtMs - oauth2TokenExpiryBufferMs
+    ) {
+      return oauthState.accessToken
+    }
+    if (oauthState.refreshPromise) {
+      return oauthState.refreshPromise
+    }
+    const refreshPromise = httpClient
+      .post<{
+        access_token?: string
+        expires_in?: number
+      }>(
+        tokenUrl,
+        new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: scopes.join(' '),
+          ...(oauthClientCredentials.extraParams || {}),
+        }),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        }
+      )
+      .then(response => {
+        const token = response.data?.access_token
+        if (!token) {
+          throw new Error('OAuth2 client credentials returned no access_token')
+        }
+        const expiresInSeconds =
+          typeof response.data?.expires_in === 'number'
+            ? response.data.expires_in
+            : oauth2DefaultExpirySeconds
+        oauthState = {
+          accessToken: token,
+          expiresAtMs: Date.now() + expiresInSeconds * jwtSecondsToMilliseconds,
+          refreshPromise: undefined,
+        }
+        return token
+      })
+      .catch(error => {
+        oauthState = {
+          accessToken: undefined,
+          expiresAtMs: undefined,
+          refreshPromise: undefined,
+        }
+        throw error
+      })
+    oauthState = {
+      ...oauthState,
+      refreshPromise,
+    }
+    return refreshPromise
   }
 
   const _refreshWithProps = async (props?: {
@@ -213,11 +320,21 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
     ) {
       await _refreshFromStoredState()
     }
-    return authState?.token
+    const currentState = authState
+    const stateToken = currentState?.token
+    if (stateToken) {
+      return {
+        key: stateToken,
+        header: currentState?.header || defaultAuthHeader,
+        formatter: currentState?.formatter || defaultAuthFormatter,
+      }
+    }
+    const oauthToken = await _getOAuthAccessToken()
+    return oauthToken
       ? {
-          key: authState.token,
-          header: authState.header || defaultAuthHeader,
-          formatter: authState.formatter || defaultAuthFormatter,
+          key: oauthToken,
+          header: defaultAuthHeader,
+          formatter: defaultAuthFormatter,
         }
       : undefined
   }
@@ -236,6 +353,11 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
   const logout = async () => {
     authState = undefined
     refreshInFlight = undefined
+    oauthState = {
+      accessToken: undefined,
+      expiresAtMs: undefined,
+      refreshPromise: undefined,
+    }
     return {
       loggedOut: true as const,
     }

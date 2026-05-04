@@ -1117,7 +1117,7 @@ const _CONTEXT: Record<string, _ContextFactory> = {
               },
               targets: {
                 secondary: {
-                  clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+                  scope: 'openid profile',
                 },
               },
             },

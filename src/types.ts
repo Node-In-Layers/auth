@@ -90,6 +90,15 @@ export enum TokenExchangeClientAuth {
 }
 
 /**
+ * Shared OAuth client authentication settings.
+ */
+export type OAuthClientConfig = Readonly<{
+  clientId: string
+  clientSecret: string
+  clientAuth?: TokenExchangeClientAuth
+}>
+
+/**
  * OIDC claims used to look up or match a local user (e.g. from an ID token).
  * @interface
  */
@@ -159,9 +168,9 @@ export type OAuthTokenExchangeDisabledConfig = Readonly<{
 
 export type OAuthTokenExchangeEnabledConfig = Readonly<{
   enabled: true
-  tokenEndpoint: string
-  clientId: string
-  clientSecret: string
+  tokenEndpoint?: string
+  clientId?: string
+  clientSecret?: string
   clientAuth?: TokenExchangeClientAuth
   defaultAudience?: string
   defaultResource?: string
@@ -176,12 +185,41 @@ export type OAuthTokenExchangeConfig = XOR<
 >
 
 /**
+ * OAuth2 client credentials configuration for auth client token acquisition.
+ */
+export type OAuthClientCredentialsDisabledConfig = Readonly<{
+  enabled: false
+}>
+
+export type OAuthClientCredentialsEnabledConfig = Readonly<{
+  enabled: true
+  tokenUrl?: string
+  clientId?: string
+  clientSecret?: string
+  clientAuth?: TokenExchangeClientAuth
+  scopes?: readonly string[]
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+export type OAuthClientCredentialsConfig = XOR<
+  OAuthClientCredentialsDisabledConfig,
+  OAuthClientCredentialsEnabledConfig
+>
+
+/**
  * OAuth/OIDC configuration grouping all oauth-related auth settings.
  */
 export type ApiAuthenticationOAuthConfig = Readonly<{
+  tokenEndpoint?: string
+  tokenUrl?: string
+  scopes?: readonly string[]
+  clientId?: string
+  clientSecret?: string
+  clientAuth?: TokenExchangeClientAuth
   oidc?: OAuthOidcConfig
   passthrough?: OAuthPassthroughConfig
   tokenExchange?: OAuthTokenExchangeConfig
+  clientCredentials?: OAuthClientCredentialsConfig
 }>
 
 /**
@@ -196,7 +234,7 @@ export type ApiAuthenticationConfig = Readonly<{
   skipAllAuthentication?: boolean
   /**
    * The domain.featureName for each login approach, in order.
-   * Use [] only when oauthPassthrough.enabled is true (no password/API-key/OIDC login chain).
+   * Use [] only when oauth.passthrough.enabled is true (no password/API-key/OIDC login chain).
    */
   loginApproaches: ReadonlyArray<LoginApproachServiceName | string>
   /**
@@ -223,8 +261,6 @@ export type ApiAuthenticationConfig = Readonly<{
   clientRefreshBufferMs?: number
   basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
   oauth?: ApiAuthenticationOAuthConfig
-  /** @deprecated Use oauth.oidc.parsePayloadIdentifiers */
-  parseOidcPayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
   /** Required when core allowPasswordAuthentication is true. */
   passwordHashSecretKey?: string
   noSaveLoginAttempts?: boolean
@@ -239,19 +275,6 @@ export type ApiAuthenticationConfig = Readonly<{
     cleanupMaxQueries?: number
   }>
   jwtAlgorithms?: readonly string[]
-  /** @deprecated Use oauth.oidc.jwksUris */
-  jwksUris?: readonly string[]
-  /**
-   * Upstream Bearer pass-through (JWKS verification, optional auto-provision, opaque mode).
-   */
-  /** @deprecated Use oauth.passthrough */
-  oauthPassthrough?: OAuthPassthroughConfig
-  /**
-   * OAuth 2.0 Token Exchange (RFC 8693) configuration for on-behalf-of calls.
-   * Keep this IdP-agnostic; vendor-specific settings belong in the app config.
-   */
-  /** @deprecated Use oauth.tokenExchange */
-  tokenExchange?: OAuthTokenExchangeConfig
 }>
 
 /**

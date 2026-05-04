@@ -168,18 +168,15 @@ export const requirePasswordHashSecretKey = (
 
 export const getOAuthPassthroughConfig = (
   authentication?: ApiAuthenticationConfig
-) => authentication?.oauth?.passthrough ?? authentication?.oauthPassthrough
+) => authentication?.oauth?.passthrough
 
 export const getOidcJwksUris = (
   authentication: ApiAuthenticationConfig
-): readonly string[] =>
-  authentication.oauth?.oidc?.jwksUris ?? authentication.jwksUris ?? []
+): readonly string[] => authentication.oauth?.oidc?.jwksUris ?? []
 
 export const getParseOidcPayloadIdentifiers = (
   authentication: ApiAuthenticationConfig
-) =>
-  authentication.oauth?.oidc?.parsePayloadIdentifiers ??
-  authentication.parseOidcPayloadIdentifiers
+) => authentication.oauth?.oidc?.parsePayloadIdentifiers
 
 export const hashPassword = async (
   password: string,
@@ -287,10 +284,11 @@ export const getBearerFromAuthorization = (
 }
 
 type _TokenExchangeConfig = Exclude<
-  | NonNullable<ApiAuthenticationConfig['oauth']>['tokenExchange']
-  | ApiAuthenticationConfig['tokenExchange'],
+  NonNullable<ApiAuthenticationConfig['oauth']>['tokenExchange'],
   undefined
 >
+
+type _OAuthConfig = NonNullable<ApiAuthenticationConfig['oauth']>
 
 type _TokenExchangeTargetConfig = NonNullable<
   _TokenExchangeConfig['targets']
@@ -299,8 +297,7 @@ type _TokenExchangeTargetConfig = NonNullable<
 export const requireEnabledTokenExchange = (
   authentication: ApiAuthenticationConfig
 ): Extract<_TokenExchangeConfig, { enabled: true }> => {
-  const tokenExchange =
-    authentication.oauth?.tokenExchange ?? authentication.tokenExchange
+  const tokenExchange = authentication.oauth?.tokenExchange
   if (!tokenExchange?.enabled) {
     throw new Error('tokenExchange is not enabled')
   }
@@ -321,10 +318,14 @@ export const resolveTokenExchangeTarget = (
 export const resolveTokenExchangeTokenEndpoint = (
   props: TokenExchangeRequest | undefined,
   target: _TokenExchangeTargetConfig | undefined,
-  tokenExchange: _TokenExchangeConfig
+  tokenExchange: _TokenExchangeConfig,
+  oauthConfig?: _OAuthConfig
 ): string => {
   const tokenEndpoint =
-    props?.tokenEndpoint ?? target?.tokenEndpoint ?? tokenExchange.tokenEndpoint
+    props?.tokenEndpoint ??
+    target?.tokenEndpoint ??
+    tokenExchange.tokenEndpoint ??
+    oauthConfig?.tokenEndpoint
   if (!tokenEndpoint) {
     throw new Error('tokenExchange.tokenEndpoint is required')
   }
@@ -368,16 +369,19 @@ export const mergeTokenExchangeExtraParams = (
 })
 
 export const requireTokenExchangeClientCredentials = (
-  tokenExchange: _TokenExchangeConfig
+  tokenExchange: _TokenExchangeConfig,
+  oauthConfig?: _OAuthConfig
 ): Readonly<{
   clientId: string
   clientSecret: string
   clientAuth: TokenExchangeClientAuth
 }> => {
   const clientAuth =
-    tokenExchange.clientAuth ?? TokenExchangeClientAuth.ClientSecretBasic
-  const clientId = tokenExchange.clientId
-  const clientSecret = tokenExchange.clientSecret
+    tokenExchange.clientAuth ??
+    oauthConfig?.clientAuth ??
+    TokenExchangeClientAuth.ClientSecretBasic
+  const clientId = tokenExchange.clientId ?? oauthConfig?.clientId
+  const clientSecret = tokenExchange.clientSecret ?? oauthConfig?.clientSecret
   if (!clientId) {
     throw new Error('tokenExchange.clientId is required')
   }

@@ -307,7 +307,7 @@ describe('/src/api/internal-libs.ts', () => {
     }) as ApiAuthenticationConfig
 
   const _getTokenExchange = (authentication: ApiAuthenticationConfig) =>
-    authentication.oauth?.tokenExchange ?? authentication.tokenExchange
+    authentication.oauth?.tokenExchange
 
   describe('#getBearerFromAuthorization()', () => {
     it('should return the token for a Bearer header', () => {
@@ -349,20 +349,6 @@ describe('/src/api/internal-libs.ts', () => {
           oauth: { tokenExchange: { enabled: false } },
         } as ApiAuthenticationConfig)
       }, /tokenExchange is not enabled/)
-    })
-
-    it('should still support legacy top-level tokenExchange config', () => {
-      const actual = requireEnabledTokenExchange({
-        ..._minimalAuth(),
-        tokenExchange: {
-          enabled: true,
-          tokenEndpoint: 'https://idp.example/token',
-          clientId: 'cid',
-          clientSecret: 'csec',
-        },
-      } as ApiAuthenticationConfig)
-      assert.equal(actual.tokenEndpoint, 'https://idp.example/token')
-      assert.isTrue(actual.enabled)
     })
   })
 
@@ -424,6 +410,22 @@ describe('/src/api/internal-libs.ts', () => {
       assert.throws(() => {
         resolveTokenExchangeTokenEndpoint(undefined, undefined, noEndpoint)
       }, /tokenExchange.tokenEndpoint is required/)
+    })
+
+    it('should fall back to oauth.tokenEndpoint when tokenExchange has no endpoint', () => {
+      const noEndpoint = {
+        ...tokenExchange,
+        tokenEndpoint: undefined,
+      }
+      const actual = resolveTokenExchangeTokenEndpoint(
+        undefined,
+        undefined,
+        noEndpoint,
+        {
+          tokenEndpoint: 'https://oauth.example/token',
+        } as any
+      )
+      assert.equal(actual, 'https://oauth.example/token')
     })
   })
 
@@ -554,6 +556,27 @@ describe('/src/api/internal-libs.ts', () => {
           clientSecret: undefined,
         } as any)
       }, /tokenExchange.clientSecret is required/)
+    })
+
+    it('should fall back to oauth root client settings when missing in tokenExchange', () => {
+      const actual = requireTokenExchangeClientCredentials(
+        {
+          ...tokenExchange,
+          clientId: undefined,
+          clientSecret: undefined,
+          clientAuth: undefined,
+        } as any,
+        {
+          clientId: 'oauth-client-id',
+          clientSecret: 'oauth-client-secret',
+          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+        } as any
+      )
+      assert.deepEqual(actual, {
+        clientId: 'oauth-client-id',
+        clientSecret: 'oauth-client-secret',
+        clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+      })
     })
   })
 

@@ -87,7 +87,7 @@ When pass-through is enabled, clients send an upstream Bearer (e.g. OIDC access 
 
 ## OAuth token exchange (on-behalf-of)
 
-When **`authentication.tokenExchange`** is enabled, API services expose **`getOnBehalfOfHttpClient(props?, crossLayerProps)`** and **`exchangeAccessToken(props?, crossLayerProps)`**. These perform an OAuth 2.0 token exchange at your configured token endpoint: the **subject token** is the incoming request’s Bearer (from `crossLayerProps`), unless you pass **`subjectToken`** in `props`. The result is a **downstream access token** you can use to call another API as that user.
+When **`authentication.oauth.tokenExchange`** is enabled, API services expose **`getOnBehalfOfHttpClient(props?, crossLayerProps)`** and **`exchangeAccessToken(props?, crossLayerProps)`**. These perform an OAuth 2.0 token exchange at your configured token endpoint: the **subject token** is the incoming request’s Bearer (from `crossLayerProps`), unless you pass **`subjectToken`** in `props`. The result is a **downstream access token** you can use to call another API as that user.
 
 **From a feature:** resolve auth API services from your features context (same pattern as other API services), pass **`crossLayerProps`** from the feature invocation, and use an empty props object when the defaults (or a named **target**) already describe the exchange:
 
@@ -104,7 +104,7 @@ const { data } = await http.get('https://downstream.example/api/v1/resource')
 
 `getOnBehalfOfHttpClient` returns an Axios instance whose default `Authorization` header is `Bearer <exchanged access token>`. Use **`exchangeAccessToken`** instead if you only need the token or want to handle HTTP yourself.
 
-You can configure **multiple named targets** (see `authentication.tokenExchange.targets` in the config reference): each target can point at a different token endpoint and/or audience, resource, and scope for a specific downstream service. To exchange for a **different** service than the default, pass **`target`** with the key used in config:
+You can configure **multiple named targets** (see `authentication.oauth.tokenExchange.targets` in the config reference): each target can point at a different token endpoint and/or audience, resource, and scope for a specific downstream service. To exchange for a **different** service than the default, pass **`target`** with the key used in config:
 
 ```typescript
 const http = await context.services[AuthNamespace.Api].getOnBehalfOfHttpClient(
@@ -185,14 +185,17 @@ const config = {
         cleanupBatchSize: 500,
         cleanupMaxQueries: 20,
       },
-      jwksUris: ['https://your-provider/.well-known/jwks.json'],
-
-      // Optional upstream Bearer (often with loginApproaches: [] on MCP).
-      oauthPassthrough: {
-        enabled: true,
-        validateMode: 'jwks',
-        autoProvision: true,
-        claimMapping: {},
+      oauth: {
+        oidc: {
+          jwksUris: ['https://your-provider/.well-known/jwks.json'],
+        },
+        // Optional upstream Bearer (often with loginApproaches: [] on MCP).
+        passthrough: {
+          enabled: true,
+          validateMode: 'jwks',
+          autoProvision: true,
+          claimMapping: {},
+        },
       },
 
       // loginPath: '/login',
@@ -336,7 +339,6 @@ type OrganizationReferenceProperty = Readonly<{
     loginPropsSchema?: ZodType<JsonObj>
     skipAllAuthentication?: boolean
     basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
-    parseOidcPayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
     passwordHashSecretKey?: string
     noSaveLoginAttempts?: boolean
     jwtSecret?: string
@@ -350,42 +352,65 @@ type OrganizationReferenceProperty = Readonly<{
       cleanupBatchSize?: number
       cleanupMaxQueries?: number
     }
-    jwksUris?: readonly string[]
-    oauthPassthrough?: {
-      enabled: boolean
-      validateMode?: 'jwks' | 'opaque'
-      autoProvision?: boolean
-      claimMapping?: {
-        email?: string
-        firstName?: string
-        lastName?: string
-        username?: string
-      }
-    }
-    /**
-     * RFC 8693 token exchange for getOnBehalfOfHttpClient / exchangeAccessToken.
-     * Requires tokenEndpoint, clientId, clientSecret when enabled.
-     */
-    tokenExchange?: {
-      enabled: boolean
+    oauth?: {
       tokenEndpoint?: string
-      clientAuth?: 'client_secret_basic' | 'client_secret_post'
+      tokenUrl?: string
+      scopes?: readonly string[]
       clientId?: string
       clientSecret?: string
-      defaultAudience?: string
-      defaultResource?: string
-      defaultScope?: string
-      targets?: Record<
-        string,
-        {
-          tokenEndpoint?: string
-          audience?: string
-          resource?: string
-          scope?: string
-          extraParams?: Record<string, string>
+      clientAuth?: 'client_secret_basic' | 'client_secret_post'
+      oidc?: {
+        jwksUris: readonly string[]
+        parsePayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
+      }
+      passthrough?: {
+        enabled: boolean
+        validateMode?: 'jwks' | 'opaque'
+        autoProvision?: boolean
+        claimMapping?: {
+          email?: string
+          firstName?: string
+          lastName?: string
+          username?: string
         }
-      >
-      extraParams?: Record<string, string>
+      }
+      /**
+       * RFC 8693 token exchange for getOnBehalfOfHttpClient / exchangeAccessToken.
+       * Requires endpoint + client credentials when enabled, resolved from tokenExchange first, then oauth root.
+       */
+      tokenExchange?: {
+        enabled: boolean
+        tokenEndpoint?: string
+        clientAuth?: 'client_secret_basic' | 'client_secret_post'
+        clientId?: string
+        clientSecret?: string
+        defaultAudience?: string
+        defaultResource?: string
+        defaultScope?: string
+        targets?: Record<
+          string,
+          {
+            tokenEndpoint?: string
+            audience?: string
+            resource?: string
+            scope?: string
+            extraParams?: Record<string, string>
+          }
+        >
+        extraParams?: Record<string, string>
+      }
+      /**
+       * Client credentials support for auth/client getAuth().
+       */
+      clientCredentials?: {
+        enabled: boolean
+        tokenUrl?: string
+        clientId?: string
+        clientSecret?: string
+        clientAuth?: 'client_secret_basic' | 'client_secret_post'
+        scopes?: readonly string[]
+        extraParams?: Record<string, string>
+      }
     }
     loginPath?: string
     loginMethod?: string
@@ -460,9 +485,9 @@ type LoginRequest = {
 
 Without pass-through: `authenticate()` validates a **system** JWT and returns the user.
 
-With **OAuth pass-through** (`authentication.oauthPassthrough.enabled` on `[AuthNamespace.Api]`): the same Bearer is verified per `validateMode` (**jwks** → OIDC JWT + optional **autoProvision**; **opaque** → any non-empty Bearer, no user). API services expose **`getPassthroughHttpClient(crossLayerProps)`** so features can call outbound HTTP with the same Authorization header.
+With **OAuth pass-through** (`authentication.oauth.passthrough.enabled` on `[AuthNamespace.Api]`): the same Bearer is verified per `validateMode` (**jwks** → OIDC JWT + optional **autoProvision**; **opaque** → any non-empty Bearer, no user). API services expose **`getPassthroughHttpClient(crossLayerProps)`** so features can call outbound HTTP with the same Authorization header.
 
-With **token exchange** (`authentication.tokenExchange.enabled`), **`getOnBehalfOfHttpClient(props, crossLayerProps)`** uses that same incoming Bearer as the RFC 8693 subject token (unless `props.subjectToken` is set) and returns an Axios client authorized for a downstream API—see **OAuth token exchange (on-behalf-of)** above.
+With **token exchange** (`authentication.oauth.tokenExchange.enabled`), **`getOnBehalfOfHttpClient(props, crossLayerProps)`** uses that same incoming Bearer as the RFC 8693 subject token (unless `props.subjectToken` is set) and returns an Axios client authorized for a downstream API—see **OAuth token exchange (on-behalf-of)** above.
 
 - Success: user object (or `void` in opaque mode when no user is attached).
 - Failure: returns `AUTH_FAILED`.

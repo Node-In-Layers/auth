@@ -91,9 +91,7 @@ describe('/src/client/services.ts', () => {
 
       let actualError: Error | undefined
       try {
-        await services.refresh({
-          baseUrl: 'http://localhost:3000',
-        })
+        await services.refresh({})
       } catch (error) {
         actualError = error as Error
       }
@@ -157,6 +155,42 @@ describe('/src/client/services.ts', () => {
 
       assert.equal(actual.token, 'custom-token')
       assert.equal(post.callCount, 1)
+    })
+
+    it('should resolve oauth client credentials from oauth root config', async () => {
+      const post = sinon.stub().resolves({
+        data: {
+          access_token: 'oauth-token',
+          expires_in: 300,
+        },
+      })
+      const context = {
+        config: {
+          [AuthNamespace.Api]: {
+            authentication: {
+              oauth: {
+                tokenUrl: 'https://oauth.example/token',
+                clientId: 'oauth-client-id',
+                clientSecret: 'oauth-client-secret',
+                scopes: ['scope-a'],
+                clientCredentials: {
+                  enabled: true,
+                },
+              },
+            },
+          },
+        },
+      } as ServicesContext
+      sinon.stub(axios, 'create').returns({
+        post,
+      } as unknown as AxiosInstance)
+      const services = create(context)
+
+      const actual = await services.getAuth()
+
+      assert.equal(actual?.key, 'oauth-token')
+      assert.equal(post.callCount, 1)
+      assert.equal(post.firstCall.args[0], 'https://oauth.example/token')
     })
   })
 })

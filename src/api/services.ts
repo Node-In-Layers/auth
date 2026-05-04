@@ -655,7 +655,8 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     const tokenEndpoint = resolveTokenExchangeTokenEndpoint(
       props,
       target,
-      tokenExchange
+      tokenExchange,
+      authConfig.oauth
     )
     const requestHeaders = getHeaders(crossLayerProps)
     const subjectToken = resolveTokenExchangeSubjectToken(
@@ -670,7 +671,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       props
     )
     const { clientId, clientSecret, clientAuth } =
-      requireTokenExchangeClientCredentials(tokenExchange)
+      requireTokenExchangeClientCredentials(tokenExchange, authConfig.oauth)
     const formEntries = buildTokenExchangeFormEntries({
       subjectToken,
       audience,
