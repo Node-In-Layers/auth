@@ -37,6 +37,9 @@ import {
   buildTokenExchangeRequestHeaders,
   encodeTokenExchangeFormAsUrlSearchParams,
   getUserFromPayload,
+  getOidcJwksUris,
+  getOAuthPassthroughConfig,
+  getParseOidcPayloadIdentifiers,
   mergeTokenExchangeExtraParams,
   parseTokenExchangeResponseData,
   requireEnabledTokenExchange,
@@ -120,7 +123,7 @@ const verifyWithJwks = async (
   token: string,
   authentication: ApiAuthenticationConfig
 ): Promise<_JwtPayload> => {
-  const jwksUris = authentication.jwksUris ?? []
+  const jwksUris = getOidcJwksUris(authentication)
   if (!jwksUris.length) {
     throw new Error('jwksUris is required when validating jwt via jwks')
   }
@@ -286,8 +289,9 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   const _parseOidcIdentifiers = (
     payload: _JwtPayload
   ): OidcUserLookupIdentifiers => {
-    const parsed = authConfig.parseOidcPayloadIdentifiers
-      ? authConfig.parseOidcPayloadIdentifiers(payload as unknown as JsonObj)
+    const parseIdentifiers = getParseOidcPayloadIdentifiers(authConfig)
+    const parsed = parseIdentifiers
+      ? parseIdentifiers(payload as unknown as JsonObj)
       : {
           sub: typeof payload.sub === 'string' ? payload.sub : undefined,
           iss: typeof payload.iss === 'string' ? payload.iss : undefined,
@@ -319,7 +323,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     if (!bySub || !byIss) {
       throw new Error('OAuth passthrough autoProvision requires sub and iss')
     }
-    const map = authConfig.oauthPassthrough?.claimMapping ?? {}
+    const map = getOAuthPassthroughConfig(authConfig)?.claimMapping ?? {}
     const email = _normalizeIdentifier(
       _claimString(
         payload,

@@ -35,7 +35,10 @@ import {
   PolicyContext,
 } from '../core/types.js'
 import { policyEngine } from '../core/libs/policy-engine.js'
-import { unpackAuthentication } from './internal-libs.js'
+import {
+  getOAuthPassthroughConfig,
+  unpackAuthentication,
+} from './internal-libs.js'
 import {
   ApiFeaturesLayer,
   ApiServices,
@@ -214,7 +217,7 @@ export const create = (
   ) => {
     const log = context.log.getInnerLogger('authenticate', crossLayerProps)
     const apiConfig = context.config[AuthNamespace.Api] as ApiConfig
-    const passthrough = apiConfig?.authentication?.oauthPassthrough
+    const passthrough = getOAuthPassthroughConfig(apiConfig?.authentication)
 
     const tryLocalJwt = () =>
       apiServices.validateJwt(props.token, crossLayerProps)

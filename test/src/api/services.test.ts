@@ -344,14 +344,16 @@ describe('/src/api/services.ts', () => {
 
     it('should exchange using bearer from crossLayerProps and client_secret_basic', async () => {
       const context = createBaseContext({
-        tokenExchange: {
-          enabled: true,
-          tokenEndpoint: 'https://issuer.example/token',
-          clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
-          clientId: 'cid',
-          clientSecret: 'csecret',
-          defaultAudience: 'svc-b',
-          defaultScope: 'read:things',
+        oauth: {
+          tokenExchange: {
+            enabled: true,
+            tokenEndpoint: 'https://issuer.example/token',
+            clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
+            clientId: 'cid',
+            clientSecret: 'csecret',
+            defaultAudience: 'svc-b',
+            defaultScope: 'read:things',
+          },
         },
       })
       stubCoreModels(context)
@@ -404,12 +406,14 @@ describe('/src/api/services.ts', () => {
 
     it('should include client credentials in form when client_secret_post is used', async () => {
       const context = createBaseContext({
-        tokenExchange: {
-          enabled: true,
-          tokenEndpoint: 'https://issuer.example/token',
-          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
-          clientId: 'cid',
-          clientSecret: 'csecret',
+        oauth: {
+          tokenExchange: {
+            enabled: true,
+            tokenEndpoint: 'https://issuer.example/token',
+            clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+            clientId: 'cid',
+            clientSecret: 'csecret',
+          },
         },
       })
       stubCoreModels(context)
@@ -444,19 +448,21 @@ describe('/src/api/services.ts', () => {
 
     it('should apply target overrides for audience/scope and extraParams', async () => {
       const context = createBaseContext({
-        tokenExchange: {
-          enabled: true,
-          tokenEndpoint: 'https://issuer.example/token',
-          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
-          clientId: 'cid',
-          clientSecret: 'csecret',
-          defaultScope: 'default',
-          extraParams: { global: '1' },
-          targets: {
-            files: {
-              audience: 'files-svc',
-              scope: 'files:read',
-              extraParams: { target: '1' },
+        oauth: {
+          tokenExchange: {
+            enabled: true,
+            tokenEndpoint: 'https://issuer.example/token',
+            clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+            clientId: 'cid',
+            clientSecret: 'csecret',
+            defaultScope: 'default',
+            extraParams: { global: '1' },
+            targets: {
+              files: {
+                audience: 'files-svc',
+                scope: 'files:read',
+                extraParams: { target: '1' },
+              },
             },
           },
         },
@@ -489,12 +495,14 @@ describe('/src/api/services.ts', () => {
   describe('#getOnBehalfOfHttpClient()', () => {
     it('should return axios instance with downstream bearer', async () => {
       const context = createBaseContext({
-        tokenExchange: {
-          enabled: true,
-          tokenEndpoint: 'https://issuer.example/token',
-          clientAuth: TokenExchangeClientAuth.ClientSecretPost,
-          clientId: 'cid',
-          clientSecret: 'csecret',
+        oauth: {
+          tokenExchange: {
+            enabled: true,
+            tokenEndpoint: 'https://issuer.example/token',
+            clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+            clientId: 'cid',
+            clientSecret: 'csecret',
+          },
         },
       })
       stubCoreModels(context)

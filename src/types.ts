@@ -1,4 +1,4 @@
-import { Config } from '@node-in-layers/core'
+import { Config, XOR } from '@node-in-layers/core'
 import { z } from 'zod'
 import {
   DataDescription,
@@ -99,6 +99,92 @@ export type OidcUserLookupIdentifiers = Readonly<{
 }>
 
 /**
+ * OIDC settings used by oauth login/passthrough jwt validation.
+ * `jwksUris` is required whenever this section is provided.
+ */
+export type OAuthOidcConfig = Readonly<{
+  jwksUris: readonly string[]
+  parsePayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
+}>
+
+/**
+ * OAuth pass-through configuration.
+ */
+export type OAuthPassthroughDisabledConfig = Readonly<{
+  enabled: false
+}>
+
+export type OAuthPassthroughEnabledConfig = Readonly<{
+  enabled: true
+  validateMode?: OAuthPassthroughValidateMode
+  autoProvision?: boolean
+  claimMapping?: Readonly<{
+    email?: string
+    firstName?: string
+    lastName?: string
+    username?: string
+  }>
+}>
+
+export type OAuthPassthroughConfig = XOR<
+  OAuthPassthroughDisabledConfig,
+  OAuthPassthroughEnabledConfig
+>
+
+/**
+ * OAuth token exchange per-target override configuration.
+ */
+export type OAuthTokenExchangeTargetConfig = Readonly<{
+  tokenEndpoint?: string
+  audience?: string
+  resource?: string
+  scope?: string
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+/**
+ * OAuth token exchange configuration.
+ * When enabled, client credentials are required.
+ */
+export type OAuthTokenExchangeDisabledConfig = Readonly<{
+  enabled: false
+  targets?: Readonly<Record<string, OAuthTokenExchangeTargetConfig>>
+  extraParams?: Readonly<Record<string, string>>
+  defaultAudience?: string
+  defaultResource?: string
+  defaultScope?: string
+  tokenEndpoint?: string
+  clientAuth?: TokenExchangeClientAuth
+}>
+
+export type OAuthTokenExchangeEnabledConfig = Readonly<{
+  enabled: true
+  tokenEndpoint: string
+  clientId: string
+  clientSecret: string
+  clientAuth?: TokenExchangeClientAuth
+  defaultAudience?: string
+  defaultResource?: string
+  defaultScope?: string
+  targets?: Readonly<Record<string, OAuthTokenExchangeTargetConfig>>
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+export type OAuthTokenExchangeConfig = XOR<
+  OAuthTokenExchangeDisabledConfig,
+  OAuthTokenExchangeEnabledConfig
+>
+
+/**
+ * OAuth/OIDC configuration grouping all oauth-related auth settings.
+ */
+export type ApiAuthenticationOAuthConfig = Readonly<{
+  oidc?: OAuthOidcConfig
+  passthrough?: OAuthPassthroughConfig
+  tokenExchange?: OAuthTokenExchangeConfig
+}>
+
+/**
  * All API-layer authentication settings: login, JWT, refresh tokens, transport paths, OAuth pass-through.
  * @interface
  */
@@ -136,6 +222,8 @@ export type ApiAuthenticationConfig = Readonly<{
    */
   clientRefreshBufferMs?: number
   basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
+  oauth?: ApiAuthenticationOAuthConfig
+  /** @deprecated Use oauth.oidc.parsePayloadIdentifiers */
   parseOidcPayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
   /** Required when core allowPasswordAuthentication is true. */
   passwordHashSecretKey?: string
@@ -151,67 +239,19 @@ export type ApiAuthenticationConfig = Readonly<{
     cleanupMaxQueries?: number
   }>
   jwtAlgorithms?: readonly string[]
+  /** @deprecated Use oauth.oidc.jwksUris */
   jwksUris?: readonly string[]
   /**
    * Upstream Bearer pass-through (JWKS verification, optional auto-provision, opaque mode).
    */
-  oauthPassthrough?: Readonly<{
-    enabled: boolean
-    validateMode?: OAuthPassthroughValidateMode
-    autoProvision?: boolean
-    claimMapping?: Readonly<{
-      email?: string
-      firstName?: string
-      lastName?: string
-      username?: string
-    }>
-  }>
+  /** @deprecated Use oauth.passthrough */
+  oauthPassthrough?: OAuthPassthroughConfig
   /**
    * OAuth 2.0 Token Exchange (RFC 8693) configuration for on-behalf-of calls.
    * Keep this IdP-agnostic; vendor-specific settings belong in the app config.
    */
-  tokenExchange?: Readonly<{
-    enabled: boolean
-    /**
-     * OAuth 2.0 Token Endpoint for token exchange.
-     * Example (Keycloak): https://<host>/realms/<realm>/protocol/openid-connect/token
-     */
-    tokenEndpoint?: string
-    /**
-     * Client authentication method at the token endpoint.
-     * - client_secret_basic: Authorization: Basic base64(client_id:client_secret)
-     * - client_secret_post: client_id/client_secret in request body
-     */
-    clientAuth?: TokenExchangeClientAuth
-    clientId?: string
-    clientSecret?: string
-    /**
-     * Default parameters for exchanges when no per-target override is supplied.
-     * Prefer audience/resource binding per downstream service.
-     */
-    defaultAudience?: string
-    defaultResource?: string
-    defaultScope?: string
-    /**
-     * Per-target overrides. Allows exchanging tokens for N downstream services.
-     */
-    targets?: Readonly<
-      Record<
-        string,
-        Readonly<{
-          tokenEndpoint?: string
-          audience?: string
-          resource?: string
-          scope?: string
-          extraParams?: Readonly<Record<string, string>>
-        }>
-      >
-    >
-    /**
-     * Extra parameters appended to all exchanges (escape hatch).
-     */
-    extraParams?: Readonly<Record<string, string>>
-  }>
+  /** @deprecated Use oauth.tokenExchange */
+  tokenExchange?: OAuthTokenExchangeConfig
 }>
 
 /**

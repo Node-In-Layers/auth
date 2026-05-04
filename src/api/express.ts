@@ -18,6 +18,7 @@ import {
   createProtectedMiddleware,
   normalizeMethod,
 } from './internal-transport-libs.js'
+import { getOAuthPassthroughConfig } from './internal-libs.js'
 
 const EXPRESS_NAMESPACE = '@node-in-layers/rest-api/express'
 
@@ -69,7 +70,9 @@ export const create = (context: _ExpressContext): ApiExpress => {
       host.addPreRouteMiddleware(middleware)
     }
 
-  const oauthPassthrough = apiConfig?.authentication?.oauthPassthrough?.enabled
+  const oauthPassthrough = getOAuthPassthroughConfig(
+    apiConfig?.authentication
+  )?.enabled
   const authn = apiConfig?.authentication
 
   if (!oauthPassthrough) {

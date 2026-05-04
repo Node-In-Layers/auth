@@ -909,7 +909,11 @@ const _CONTEXT: Record<string, _ContextFactory> = {
       [AuthNamespace.Api]: {
         authentication: {
           loginApproaches: [LoginApproachServiceName.OidcAuthLogin],
-          jwksUris: [provider.jwksUri],
+          oauth: {
+            oidc: {
+              jwksUris: [provider.jwksUri],
+            },
+          },
           jwtIssuer: provider.issuer,
           jwtAudience: 'feature-test-client',
           jwtSecret: undefined,
@@ -1033,12 +1037,16 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         [AuthNamespace.Api]: {
           authentication: {
             loginApproaches: [],
-            oauthPassthrough: {
-              enabled: true,
-              validateMode: OAuthPassthroughValidateMode.Jwks,
-              autoProvision: true,
+            oauth: {
+              passthrough: {
+                enabled: true,
+                validateMode: OAuthPassthroughValidateMode.Jwks,
+                autoProvision: true,
+              },
+              oidc: {
+                jwksUris: [provider.jwksUri],
+              },
             },
-            jwksUris: [provider.jwksUri],
             jwtIssuer: provider.issuer,
             jwtAudience: 'feature-test-client',
             jwtSecret: 'feature-test-jwt-secret',
@@ -1056,12 +1064,16 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         [AuthNamespace.Api]: {
           authentication: {
             loginApproaches: [],
-            oauthPassthrough: {
-              enabled: true,
-              validateMode: OAuthPassthroughValidateMode.Jwks,
-              autoProvision: true,
+            oauth: {
+              passthrough: {
+                enabled: true,
+                validateMode: OAuthPassthroughValidateMode.Jwks,
+                autoProvision: true,
+              },
+              oidc: {
+                jwksUris: [provider.jwksUri],
+              },
             },
-            jwksUris: [provider.jwksUri],
             jwtIssuer: provider.issuer,
             jwtAudience: 'feature-test-client',
             jwtSecret: 'feature-test-jwt-secret',
@@ -1090,21 +1102,23 @@ const _CONTEXT: Record<string, _ContextFactory> = {
           jwtIssuer: 'feature-tests',
           jwtAudience: 'feature-tests',
           jwtExpiresInSeconds: 5000,
-          tokenExchange: {
-            enabled: true,
-            tokenEndpoint: provider.tokenEndpoint,
-            clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
-            clientId: 'exchange-client',
-            clientSecret: 'exchange-client-secret',
-            defaultScope: 'openid profile email',
-            extraParams: {
-              connector_id: 'oidc-self',
-              requested_token_type:
-                'urn:ietf:params:oauth:token-type:access_token',
-            },
-            targets: {
-              secondary: {
-                clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+          oauth: {
+            tokenExchange: {
+              enabled: true,
+              tokenEndpoint: provider.tokenEndpoint,
+              clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
+              clientId: 'exchange-client',
+              clientSecret: 'exchange-client-secret',
+              defaultScope: 'openid profile email',
+              extraParams: {
+                connector_id: 'oidc-self',
+                requested_token_type:
+                  'urn:ietf:params:oauth:token-type:access_token',
+              },
+              targets: {
+                secondary: {
+                  clientAuth: TokenExchangeClientAuth.ClientSecretPost,
+                },
               },
             },
           },

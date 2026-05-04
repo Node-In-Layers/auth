@@ -295,14 +295,19 @@ describe('/src/api/internal-libs.ts', () => {
   const _enabledTokenExchange = (overrides?: Record<string, unknown>) =>
     ({
       ..._minimalAuth(),
-      tokenExchange: {
-        enabled: true,
-        tokenEndpoint: 'https://idp.example/token',
-        clientId: 'cid',
-        clientSecret: 'csec',
-        ...overrides,
+      oauth: {
+        tokenExchange: {
+          enabled: true,
+          tokenEndpoint: 'https://idp.example/token',
+          clientId: 'cid',
+          clientSecret: 'csec',
+          ...overrides,
+        },
       },
     }) as ApiAuthenticationConfig
+
+  const _getTokenExchange = (authentication: ApiAuthenticationConfig) =>
+    authentication.oauth?.tokenExchange ?? authentication.tokenExchange
 
   describe('#getBearerFromAuthorization()', () => {
     it('should return the token for a Bearer header', () => {
@@ -341,9 +346,23 @@ describe('/src/api/internal-libs.ts', () => {
       assert.throws(() => {
         requireEnabledTokenExchange({
           ..._minimalAuth(),
-          tokenExchange: { enabled: false },
+          oauth: { tokenExchange: { enabled: false } },
         } as ApiAuthenticationConfig)
       }, /tokenExchange is not enabled/)
+    })
+
+    it('should still support legacy top-level tokenExchange config', () => {
+      const actual = requireEnabledTokenExchange({
+        ..._minimalAuth(),
+        tokenExchange: {
+          enabled: true,
+          tokenEndpoint: 'https://idp.example/token',
+          clientId: 'cid',
+          clientSecret: 'csec',
+        },
+      } as ApiAuthenticationConfig)
+      assert.equal(actual.tokenEndpoint, 'https://idp.example/token')
+      assert.isTrue(actual.enabled)
     })
   })
 
@@ -352,27 +371,28 @@ describe('/src/api/internal-libs.ts', () => {
       targets: {
         svcA: { audience: 'aud-a' },
       },
-    }).tokenExchange!
+    })
+    const requiredTokenExchange = _getTokenExchange(tokenExchange)!
 
     it('should return undefined target when no name is given', () => {
-      const actual = resolveTokenExchangeTarget(tokenExchange)
+      const actual = resolveTokenExchangeTarget(requiredTokenExchange)
       assert.isUndefined(actual.target)
     })
 
     it('should resolve a named target', () => {
-      const actual = resolveTokenExchangeTarget(tokenExchange, 'svcA')
+      const actual = resolveTokenExchangeTarget(requiredTokenExchange, 'svcA')
       assert.equal(actual.target?.audience, 'aud-a')
     })
 
     it('should throw when the named target is missing', () => {
       assert.throws(() => {
-        resolveTokenExchangeTarget(tokenExchange, 'missing')
+        resolveTokenExchangeTarget(requiredTokenExchange, 'missing')
       }, /tokenExchange target not found: "missing"/)
     })
   })
 
   describe('#resolveTokenExchangeTokenEndpoint()', () => {
-    const tokenExchange = _enabledTokenExchange().tokenExchange!
+    const tokenExchange = _getTokenExchange(_enabledTokenExchange())!
     const target = {
       tokenEndpoint: 'https://target.example/token',
     }
@@ -432,11 +452,13 @@ describe('/src/api/internal-libs.ts', () => {
   })
 
   describe('#resolveTokenExchangeAudienceResourceScope()', () => {
-    const tokenExchange = _enabledTokenExchange({
-      defaultAudience: 'def-aud',
-      defaultResource: 'def-res',
-      defaultScope: 'def-scope',
-    }).tokenExchange!
+    const tokenExchange = _getTokenExchange(
+      _enabledTokenExchange({
+        defaultAudience: 'def-aud',
+        defaultResource: 'def-res',
+        defaultScope: 'def-scope',
+      })
+    )!
     const target = {
       audience: 'tgt-aud',
       resource: 'tgt-res',
@@ -489,9 +511,11 @@ describe('/src/api/internal-libs.ts', () => {
   })
 
   describe('#mergeTokenExchangeExtraParams()', () => {
-    const tokenExchange = _enabledTokenExchange({
-      extraParams: { a: '1', b: 'base' },
-    }).tokenExchange!
+    const tokenExchange = _getTokenExchange(
+      _enabledTokenExchange({
+        extraParams: { a: '1', b: 'base' },
+      })
+    )!
     const target = {
       extraParams: { b: 'target', c: '3' },
     }
@@ -505,7 +529,7 @@ describe('/src/api/internal-libs.ts', () => {
   })
 
   describe('#requireTokenExchangeClientCredentials()', () => {
-    const tokenExchange = _enabledTokenExchange().tokenExchange!
+    const tokenExchange = _getTokenExchange(_enabledTokenExchange())!
 
     it('should return client id, secret, and default clientAuth', () => {
       const actual = requireTokenExchangeClientCredentials(tokenExchange)

@@ -88,7 +88,7 @@ export const unpackAuthentication = (
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
   const auth = apiConfig?.authentication
 
-  const passthroughOnly = auth?.oauthPassthrough?.enabled === true
+  const passthroughOnly = getOAuthPassthroughConfig(auth)?.enabled === true
   if (!auth?.loginApproaches?.length && !passthroughOnly) {
     throw new Error(
       `Auth api config not found or loginApproaches empty. Likely not included in config (${AuthNamespace.Api}).`
@@ -165,6 +165,21 @@ export const requirePasswordHashSecretKey = (
   }
   return secret
 }
+
+export const getOAuthPassthroughConfig = (
+  authentication?: ApiAuthenticationConfig
+) => authentication?.oauth?.passthrough ?? authentication?.oauthPassthrough
+
+export const getOidcJwksUris = (
+  authentication: ApiAuthenticationConfig
+): readonly string[] =>
+  authentication.oauth?.oidc?.jwksUris ?? authentication.jwksUris ?? []
+
+export const getParseOidcPayloadIdentifiers = (
+  authentication: ApiAuthenticationConfig
+) =>
+  authentication.oauth?.oidc?.parsePayloadIdentifiers ??
+  authentication.parseOidcPayloadIdentifiers
 
 export const hashPassword = async (
   password: string,
@@ -271,8 +286,10 @@ export const getBearerFromAuthorization = (
   return token
 }
 
-type _TokenExchangeConfig = NonNullable<
-  ApiAuthenticationConfig['tokenExchange']
+type _TokenExchangeConfig = Exclude<
+  | NonNullable<ApiAuthenticationConfig['oauth']>['tokenExchange']
+  | ApiAuthenticationConfig['tokenExchange'],
+  undefined
 >
 
 type _TokenExchangeTargetConfig = NonNullable<
@@ -281,8 +298,9 @@ type _TokenExchangeTargetConfig = NonNullable<
 
 export const requireEnabledTokenExchange = (
   authentication: ApiAuthenticationConfig
-): _TokenExchangeConfig => {
-  const tokenExchange = authentication.tokenExchange
+): Extract<_TokenExchangeConfig, { enabled: true }> => {
+  const tokenExchange =
+    authentication.oauth?.tokenExchange ?? authentication.tokenExchange
   if (!tokenExchange?.enabled) {
     throw new Error('tokenExchange is not enabled')
   }
