@@ -180,6 +180,9 @@ const _createTestMcpClient = async (port: number) => {
         loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
       },
     },
+    [AuthNamespace.Client]: {
+      baseUrl,
+    },
     [McpClientNamespace.client]: {
       domains: [
         mcpClientData,

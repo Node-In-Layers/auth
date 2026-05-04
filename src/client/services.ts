@@ -1,8 +1,8 @@
-import { Config, ServicesContext } from '@node-in-layers/core'
+import { ServicesContext } from '@node-in-layers/core'
 import axios from 'axios'
 import attempt from 'lodash/attempt.js'
 import isError from 'lodash/isError.js'
-import { AuthNamespace } from '../types.js'
+import { AuthConfig, AuthNamespace } from '../types.js'
 import { DefaultLoginRequestSchema } from '../core/types.js'
 import {
   ClientAuthState,
@@ -95,16 +95,24 @@ const _isExpiredOrNearExpiry = (
   return Date.now() >= expiresAtMs - refreshBufferMs
 }
 
-export const create = (context: ServicesContext<Config>): ClientServices => {
+export const create = (
+  context: ServicesContext<AuthConfig>
+): ClientServices => {
   const authConfig = context.config?.[AuthNamespace.Api]?.authentication
+  const clientConfig = context.config?.[AuthNamespace.Client]
+  if (!clientConfig) {
+    throw new Error(
+      `Missing required ${AuthNamespace.Client} configuration for auth/client`
+    )
+  }
   const oauthConfig = authConfig?.oauth
-  const clientBaseUrl = authConfig?.clientBaseUrl
-  const clientHeaders = authConfig?.clientHeaders
+  const baseUrl = clientConfig.baseUrl
+  const headers = clientConfig.headers
   const tokenRefreshBufferMs =
-    authConfig?.clientRefreshBufferMs || defaultTokenRefreshBufferMs
+    clientConfig.refreshBufferMs || defaultTokenRefreshBufferMs
   const httpClient = axios.create({
-    ...(clientBaseUrl ? { baseURL: clientBaseUrl } : {}),
-    ...(clientHeaders ? { headers: clientHeaders } : {}),
+    ...(baseUrl ? { baseURL: baseUrl } : {}),
+    ...(headers ? { headers: headers } : {}),
   })
   const loginRequestSchema =
     authConfig?.loginPropsSchema || DefaultLoginRequestSchema
@@ -147,9 +155,9 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
   }
 
   const _resolveUrl = (path: string) => {
-    if (clientBaseUrl) {
+    if (baseUrl) {
       return _buildUrl({
-        baseUrl: clientBaseUrl,
+        baseUrl,
         path,
       })
     }
@@ -190,6 +198,11 @@ export const create = (context: ServicesContext<Config>): ClientServices => {
     }
     const tokenEndpoint =
       oauthClientCredentials.tokenEndpoint || oauthConfig?.tokenEndpoint
+    if (!tokenEndpoint) {
+      throw new Error(
+        'oauth.clientCredentials.tokenEndpoint is required (or oauth.tokenEndpoint)'
+      )
+    }
     const clientId = oauthClientCredentials.clientId || oauthConfig?.clientId
     const clientSecret =
       oauthClientCredentials.clientSecret || oauthConfig?.clientSecret

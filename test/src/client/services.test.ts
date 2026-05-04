@@ -28,7 +28,13 @@ describe('/src/client/services.ts', () => {
       sinon.stub(axios, 'create').returns({
         post,
       } as unknown as AxiosInstance)
-      const services = create({} as ServicesContext)
+      const services = create({
+        config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+          },
+        },
+      } as ServicesContext)
 
       const actual = await services.login({
         oidcAuth: {
@@ -67,7 +73,13 @@ describe('/src/client/services.ts', () => {
       sinon.stub(axios, 'create').returns({
         post,
       } as unknown as AxiosInstance)
-      const services = create({} as ServicesContext)
+      const services = create({
+        config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+          },
+        },
+      } as ServicesContext)
 
       await services.login({
         basicAuth: {
@@ -87,7 +99,13 @@ describe('/src/client/services.ts', () => {
       sinon.stub(axios, 'create').returns({
         post: sinon.stub(),
       } as unknown as AxiosInstance)
-      const services = create({} as ServicesContext)
+      const services = create({
+        config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+          },
+        },
+      } as ServicesContext)
 
       let actualError: Error | undefined
       try {
@@ -107,7 +125,13 @@ describe('/src/client/services.ts', () => {
       sinon.stub(axios, 'create').returns({
         post: sinon.stub(),
       } as unknown as AxiosInstance)
-      const services = create({} as ServicesContext)
+      const services = create({
+        config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+          },
+        },
+      } as ServicesContext)
       const state: ClientAuthState = {
         token: 'manual-token',
         refreshToken: 'manual-refresh',
@@ -135,6 +159,9 @@ describe('/src/client/services.ts', () => {
       })
       const context = {
         config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+          },
           [AuthNamespace.Api]: {
             authentication: {
               loginPropsSchema: z.object({
@@ -166,6 +193,9 @@ describe('/src/client/services.ts', () => {
       })
       const context = {
         config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+          },
           [AuthNamespace.Api]: {
             authentication: {
               oauth: {

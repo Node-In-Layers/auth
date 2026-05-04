@@ -61,6 +61,7 @@ export enum AuthNamespace {
   Core = '@node-in-layers/auth/core',
   Api = '@node-in-layers/auth/api',
   McpClient = '@node-in-layers/auth/mcp-client',
+  Client = '@node-in-layers/auth/client',
 }
 
 /** Registered login approach service names for the API layer. */
@@ -288,6 +289,12 @@ export type ApiConfig = Readonly<{
   authentication: ApiAuthenticationConfig
 }>
 
+export type AuthClientConfig = Readonly<{
+  baseUrl: string
+  headers?: Readonly<Record<string, string>>
+  refreshBufferMs?: number
+}>
+
 /**
  * Auth configuration keyed by namespace: core (user model, policies) and optional API config.
  * @interface
@@ -307,6 +314,7 @@ export type AuthConfigurations = Readonly<{
      */
     allowPasswordAuthentication?: boolean
   }
+  [AuthNamespace.Client]?: AuthClientConfig
   [AuthNamespace.Api]?: ApiConfig
 }>
 
