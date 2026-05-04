@@ -11,6 +11,12 @@ Feature: MCP client auth and feature access
     And we mcp-client refresh the token
     Then mcp-client refresh should succeed
 
+  Scenario: API key login can access protected MCP features
+    Given we use the test-mcp-server
+    When we mcp-client login with api key "22222222-2222-4222-8222-222222222222"
+    And we call mcp-client protected feature with name "World"
+    Then mcp-client greeting should contain "(Protected): Hello World"
+
   Scenario: Unprotected feature works without login
     Given we use the test-mcp-server
     When we call mcp-client unprotected feature with name "World"

@@ -95,6 +95,20 @@ const _isExpiredOrNearExpiry = (
   return Date.now() >= expiresAtMs - refreshBufferMs
 }
 
+type _ClientCredentialsArgs = Readonly<{
+  tokenEndpoint?: string
+  clientId?: string
+  clientSecret?: string
+  scopes: readonly string[]
+}>
+
+type _ResolvedClientCredentialsArgs = Readonly<{
+  tokenEndpoint: string
+  clientId: string
+  clientSecret: string
+  scopes: readonly string[]
+}>
+
 export const create = (
   context: ServicesContext<AuthConfig>
 ): ClientServices => {
@@ -163,13 +177,15 @@ export const create = (
     }
     if (!httpClient) {
       throw new Error(
-        'Auth client requires authentication.clientBaseUrl config (or a custom httpClient).'
+        'Auth client requires auth client baseUrl config (or a custom httpClient).'
       )
     }
     return path
   }
 
-  const _validateClientCredentialsArgs = args => {
+  const _validateClientCredentialsArgs = (
+    args: _ClientCredentialsArgs
+  ): _ResolvedClientCredentialsArgs => {
     if (!args.tokenEndpoint) {
       throw new Error(
         'oauth.clientCredentials.tokenEndpoint is required (or oauth.tokenEndpoint)'
@@ -190,6 +206,12 @@ export const create = (
         'oauth.clientCredentials.scopes is required (or oauth.scopes)'
       )
     }
+    return {
+      tokenEndpoint: args.tokenEndpoint,
+      clientId: args.clientId,
+      clientSecret: args.clientSecret,
+      scopes: args.scopes,
+    }
   }
 
   const _getOAuthAccessToken = async (): Promise<string | undefined> => {
@@ -208,7 +230,7 @@ export const create = (
       oauthClientCredentials.clientSecret || oauthConfig?.clientSecret
     const scopes =
       oauthClientCredentials.scopes || oauthConfig?.scopes || ([] as const)
-    _validateClientCredentialsArgs({
+    const resolvedClientCredentials = _validateClientCredentialsArgs({
       tokenEndpoint,
       clientId,
       clientSecret,
@@ -229,12 +251,12 @@ export const create = (
         access_token?: string
         expires_in?: number
       }>(
-        tokenEndpoint,
+        resolvedClientCredentials.tokenEndpoint,
         new URLSearchParams({
           grant_type: 'client_credentials',
-          client_id: clientId,
-          client_secret: clientSecret,
-          scope: scopes.join(' '),
+          client_id: resolvedClientCredentials.clientId,
+          client_secret: resolvedClientCredentials.clientSecret,
+          scope: resolvedClientCredentials.scopes.join(' '),
           ...(oauthClientCredentials.extraParams || {}),
         }),
         {
@@ -297,9 +319,9 @@ export const create = (
     if (refreshInFlight) {
       return refreshInFlight
     }
-    if (!clientBaseUrl && !httpClient) {
+    if (!baseUrl && !httpClient) {
       throw new Error(
-        'Auth client requires clientBaseUrl config (or custom httpClient) for automatic refresh.'
+        'Auth client requires auth client baseUrl config (or custom httpClient) for automatic refresh.'
       )
     }
     refreshInFlight = _refreshWithProps({

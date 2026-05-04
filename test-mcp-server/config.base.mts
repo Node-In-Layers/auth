@@ -73,7 +73,10 @@ export default async (): Promise<Config> => {
     } as AuthConfig[AuthNamespace.Core],
     [AuthNamespace.Api]: {
       authentication: {
-        loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        loginApproaches: [
+          LoginApproachServiceName.BasicAuthLogin,
+          LoginApproachServiceName.ApiKeyAuthLogin,
+        ],
         passwordHashSecretKey: 'test-mcp-server-secret',
         jwtSecret: 'test-mcp-server-jwt-secret',
         jwtIssuer: 'test-mcp-server',

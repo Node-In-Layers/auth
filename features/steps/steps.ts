@@ -2288,6 +2288,28 @@ When(
   }
 )
 
+When(
+  'we mcp-client login with api key {string}',
+  async function (this: _World, apiKey: string) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.result = await this.mcpClient
+      .login({
+        apiKeyAuth: {
+          key: apiKey,
+        },
+      })
+      .catch((error: any) => {
+        throw new Error(
+          `mcp-client api key login failed: ${JSON.stringify(error?.response?.data ?? error, null, 2)}`
+        )
+      })
+  }
+)
+
 When('we mcp-client refresh the token', async function (this: _World) {
   if (!this.mcpClient) {
     throw new Error(
