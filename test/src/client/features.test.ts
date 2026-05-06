@@ -1,6 +1,7 @@
 import { assert } from 'chai'
 import sinon from 'sinon'
 import { create } from '../../../src/client/features.js'
+import { AuthNamespace } from '../../../src/types.js'
 
 describe('/src/client/features.ts', () => {
   describe('#create()', () => {
@@ -31,7 +32,7 @@ describe('/src/client/features.ts', () => {
       const logout = sinon.stub().resolves({ loggedOut: true })
       const features = create({
         services: {
-          client: {
+          [AuthNamespace.Client]: {
             login,
             refresh,
             logout,

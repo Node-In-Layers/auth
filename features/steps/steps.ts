@@ -118,7 +118,7 @@ const _createTestMcpClient = async (port: number) => {
     features: {
       create: (context: FeaturesContext<any, McpServicesLayer>) => {
         const myProtectedFeature = context.services[
-          '@node-in-layers/mcp-client/mcp'
+          McpClientNamespace.mcp
         ].createMcpFeature({
           functionName: 'myProtectedFeature',
           domain: 'protected',
@@ -142,7 +142,7 @@ const _createTestMcpClient = async (port: number) => {
     features: {
       create: (context: FeaturesContext<any, McpServicesLayer>) => {
         const myUnprotectedFeature = context.services[
-          '@node-in-layers/mcp-client/mcp'
+          McpClientNamespace.mcp
         ].createMcpFeature({
           functionName: 'myUnprotectedFeature',
           domain: 'unprotected',
@@ -228,11 +228,7 @@ const _executeMcpClientFeature = async (
   if (typeof feature === 'function') {
     return feature(args)
   }
-  const mcp =
-    client?.[McpClientNamespace.mcp] ||
-    client?.mcp ||
-    client?.['@node-in-layers/mcp-client/mcp'] ||
-    client
+  const mcp = client?.[McpClientNamespace.mcp] || client
   if (typeof mcp.executeTool === 'function') {
     return mcp.executeTool('execute_feature', {
       domain,

@@ -116,7 +116,7 @@ export type ClientServices = Readonly<{
 }>
 
 export type ClientServicesLayer = Readonly<{
-  client: ClientServices
+  [AuthNamespace.Client]: ClientServices
 }>
 
 export type ClientFeatures = Readonly<{
@@ -128,5 +128,5 @@ export type ClientFeatures = Readonly<{
 }>
 
 export type ClientFeaturesLayer = Readonly<{
-  client: ClientFeatures
+  [AuthNamespace.Client]: ClientFeatures
 }>
