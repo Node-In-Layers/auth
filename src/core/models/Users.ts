@@ -16,7 +16,7 @@ export const create = ({
   getPrimaryKeyProperty,
 }: ModelProps<AuthConfig>) => {
   const passwordHashRequired =
-    context.config[AuthNamespace.Core].allowPasswordAuthentication ?? false
+    context.config[AuthNamespace.Core]?.allowPasswordAuthentication ?? false
   return Model<User>({
     pluralName: 'Users',
     singularName: 'User',
