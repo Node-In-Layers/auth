@@ -1,11 +1,12 @@
 import {
   CrossLayerProps,
   LayerFunction,
+  ModelCrudsFunctions,
   annotationFunctionProps,
 } from '@node-in-layers/core'
 import { JsonObj, PrimaryKeyType } from 'functional-models'
 import { z } from 'zod'
-import { AuthNamespace, PolicyAction } from '../types.js'
+import { AuthNamespace, PolicyAction, type Policy } from '../types.js'
 
 export type CoreAuthConfig = Readonly<{
   caching?: {
@@ -69,7 +70,20 @@ export type AuthCoreServices = Readonly<{
  * @interface
  */
 export type AuthCoreServicesLayer = Readonly<{
-  [AuthNamespace.Core]: AuthCoreServices
+  [AuthNamespace.Core]: AuthCoreServices &
+    Readonly<{
+      cruds: {
+        ApiKeys: ModelCrudsFunctions<ApiKey>
+        LoginAttempts: ModelCrudsFunctions<LoginAttempt>
+        OrganizationAdmins: ModelCrudsFunctions<OrganizationAdmin>
+        OrganizationAttributes: ModelCrudsFunctions<OrganizationAttribute>
+        Organizations: ModelCrudsFunctions<Organization>
+        Users: ModelCrudsFunctions<User>
+        UserAuthIdentities: ModelCrudsFunctions<UserAuthIdentity>
+        RefreshTokens: ModelCrudsFunctions<RefreshToken>
+        Policies: ModelCrudsFunctions<Policy>
+      }
+    }>
 }>
 
 /** Core auth layer features (reserved for future use). */
@@ -80,7 +94,20 @@ export type AuthCoreFeatures = Readonly<object>
  * @interface
  */
 export type CoreFeaturesLayer = Readonly<{
-  [AuthNamespace.Core]: AuthCoreFeatures
+  [AuthNamespace.Core]: AuthCoreFeatures &
+    Readonly<{
+      cruds: {
+        ApiKeys: ModelCrudsFunctions<ApiKey>
+        LoginAttempts: ModelCrudsFunctions<LoginAttempt>
+        OrganizationAdmins: ModelCrudsFunctions<OrganizationAdmin>
+        OrganizationAttributes: ModelCrudsFunctions<OrganizationAttribute>
+        Organizations: ModelCrudsFunctions<Organization>
+        Users: ModelCrudsFunctions<User>
+        UserAuthIdentities: ModelCrudsFunctions<UserAuthIdentity>
+        RefreshTokens: ModelCrudsFunctions<RefreshToken>
+        Policies: ModelCrudsFunctions<Policy>
+      }
+    }>
 }>
 
 /**
