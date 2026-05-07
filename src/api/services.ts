@@ -218,7 +218,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
   const getUserCruds = <
     TUser extends User = User,
   >(): ModelCrudsFunctions<TUser> => {
-    const customUserModel = context.config[AuthNamespace.Core].userModel
+    const customUserModel = context.config[AuthNamespace.Core]?.userModel
     if (customUserModel) {
       const { domain, modelName } =
         parseCustomUserModelReference(customUserModel)

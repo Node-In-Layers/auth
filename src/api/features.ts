@@ -216,7 +216,7 @@ export const create = (
     crossLayerProps
   ) => {
     const log = context.log.getInnerLogger('authenticate', crossLayerProps)
-    const apiConfig = context.config[AuthNamespace.Api] as ApiConfig
+    const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
     const passthrough = getOAuthPassthroughConfig(apiConfig?.authentication)
 
     const tryLocalJwt = () =>

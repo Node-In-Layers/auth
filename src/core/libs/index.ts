@@ -14,7 +14,7 @@ export const getUserPropertyOverride = <T extends Arrayable<DataValue>>(
   propertyKey: string,
   defaultValue?: PropertyConfig<any>
 ): PropertyConfig<T> => {
-  return (context.config[AuthNamespace.Core].userPropertyOverrides?.[
+  return (context.config[AuthNamespace.Core]?.userPropertyOverrides?.[
     propertyKey
   ] ||
     defaultValue ||
