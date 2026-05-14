@@ -145,6 +145,10 @@ export const create = (
   }
 
   const _applyLoginState = (result: ClientLoginResult) => {
+    if (!result.token) {
+      authState = undefined
+      return
+    }
     authState = {
       token: result.token,
       refreshToken: result.refreshToken,
@@ -157,6 +161,10 @@ export const create = (
   }
 
   const _applyRefreshState = (result: ClientRefreshResult) => {
+    if (!result.token) {
+      authState = undefined
+      return
+    }
     authState = {
       token: result.token,
       refreshToken: result.refreshToken,
@@ -305,12 +313,14 @@ export const create = (
         'No refresh token available. Call login first or pass refreshToken.'
       )
     }
-    const response = await httpClient.post<ClientRefreshResult>(
-      _resolveUrl(refreshPath),
-      {
+    const response = await httpClient
+      .post<ClientRefreshResult>(_resolveUrl(refreshPath), {
         refreshToken,
-      }
-    )
+      })
+      .catch(e => {
+        authState = undefined
+        throw e
+      })
     _applyRefreshState(response.data)
     return response.data
   }
@@ -337,10 +347,13 @@ export const create = (
     if (!parsed.success) {
       throw new Error('Invalid login request shape for auth client login')
     }
-    const response = await httpClient.post<ClientLoginResult>(
-      _resolveUrl(loginPath),
-      props
-    )
+    const response = await httpClient
+      .post<ClientLoginResult>(_resolveUrl(loginPath), props)
+      .catch(e => {
+        authState = undefined
+        refreshInFlight = undefined
+        throw e
+      })
     _applyLoginState(response.data)
     return response.data
   }
