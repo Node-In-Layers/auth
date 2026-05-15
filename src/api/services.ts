@@ -608,10 +608,12 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     return user
   }
 
-  const oidcAuthLogin: LoginApproach = async ({ request }, CrossLayerProps) => {
+  const oidcAuthLogin: LoginApproach = async (props, CrossLayerProps) => {
     const log = context.log.getInnerLogger('oidcAuthLogin', CrossLayerProps)
-    const token = (request as _LoginRequest).oidcAuth?.token
+    log.trace('oidcAuthLogin', { props })
+    const token = (props?.request as _LoginRequest)?.oidcAuth?.token
     if (!token) {
+      log.warn('No token provided')
       return undefined
     }
     return Promise.resolve()
