@@ -66,6 +66,9 @@ const _decodeBase64Url = (value: string): string | undefined => {
 }
 
 const _getTokenExpiryMs = (token: string): number | undefined => {
+  if (!token) {
+    return undefined
+  }
   const payloadSegment = token.split('.')[1]
   if (!payloadSegment) {
     return undefined
