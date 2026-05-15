@@ -618,10 +618,14 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       .then(async () => {
         const payload = await verifyWithJwks(token, authConfig)
         if (!_isJwtPayload(payload)) {
+          log.warn('Invalid JWT payload', { payload })
           return undefined
         }
+        log.trace('Valid JWT payload', { payload })
         const identifiers = _parseOidcIdentifiers(payload)
+        log.trace('Parsed OIDC identifiers', { identifiers })
         const user = await _resolveEnabledUserFromIdentifiers(identifiers)
+        log.trace('Resolved enabled user', { user })
         return user
       })
       .catch(e => {
