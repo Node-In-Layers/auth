@@ -24,7 +24,7 @@ import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
 
 Important:
 
-- Do **not** add `@node-in-layers/auth/mcp-client` to `apps` as a domain.
+- Do **not** add `@node-in-layers/auth/mcp-client` to `domains` in core config.
 - This is an entries helper, not a domain you register in system config.
 - Pass the MCP client config you want to use. The helper adds the auth client domain and auth adapter wiring for you.
 
@@ -134,7 +134,7 @@ import { authModelCrudsOverrides } from '@node-in-layers/auth/api/index.js'
 
 const config = {
   [CoreNamespace.root]: {
-    apps: [
+    domains: [
       await import('@node-in-layers/data/index.js'),
 
       // Add "Transport" Layer (rest-api or mcp-server)

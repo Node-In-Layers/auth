@@ -22,9 +22,9 @@ export default [
   {
     ignores: [
       'test-mcp-server/',
-      'buildDocs/',
-      'cucumber.mjs',
       'features/',
+      'cucumber.mjs',
+      'buildDocs/',
       'config.*.mjs',
       'coverage/',
       'dist/',
@@ -81,7 +81,6 @@ export default [
         typescript: true,
         node: {
           extensions: ['.ts', '.tsx'],
-          moduleDirectory: ['node_modules', path.join(__dirname, 'src')],
         },
       },
     },
@@ -161,7 +160,15 @@ export default [
       'no-sequences': ['error'],
       'no-throw-literal': ['error'],
       'no-unmodified-loop-condition': ['error'],
-      'no-unused-expressions': ['error'],
+      'no-unused-expressions': 0,
+      '@typescript-eslint/no-unused-expressions': [
+        'error',
+        {
+          allowShortCircuit: false,
+          allowTernary: false,
+          allowTaggedTemplates: false,
+        },
+      ],
       'no-useless-call': ['error'],
       'no-useless-concat': ['error'],
       'no-void': ['error'],
@@ -234,7 +241,7 @@ export default [
       'import/exports-last': 0,
       'import/no-duplicates': ['error'],
       'import/no-namespace': 0,
-      'import/extensions': ['error'],
+      'import/extensions': 0,
       'import/order': ['error'],
       'import/newline-after-import': ['error'],
       'import/prefer-default-export': 0,

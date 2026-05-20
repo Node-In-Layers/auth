@@ -165,7 +165,7 @@ const _createTestMcpClient = async (port: number) => {
     environment: 'cucumber-test',
     systemName: 'auth-mcp-client-cucumber',
     [CoreNamespace.root]: {
-      apps: [],
+      domains: [],
       layerOrder: ['services', 'features', 'mcp'],
       logging: {
         logFormat: LogFormat.json,
@@ -744,7 +744,7 @@ const _createSystem = async (
       systemName: '@node-in-layers/auth/features-test',
       environment: 'cucumber-test',
       [CoreNamespace.root]: {
-        apps: [
+        domains: [
           // Provides us data backbone.
           await import('@node-in-layers/data/index.js'),
           transportApp,
@@ -1766,7 +1766,7 @@ Given(
     }
     this.context = await createContext()
 
-    const expressApp = this.context.config[CoreNamespace.root].apps.find(
+    const expressApp = this.context.config[CoreNamespace.root].domains.find(
       (x: any) => x.name === '@node-in-layers/rest-api/express'
     )
     if (!expressApp?.mockExpress || !expressApp?.expressApp) {
@@ -1834,7 +1834,7 @@ Given(
     }
     this.context = await createContext()
 
-    const mcpApp = this.context.config[CoreNamespace.root].apps.find(
+    const mcpApp = this.context.config[CoreNamespace.root].domains.find(
       (x: any) => x.name === '@node-in-layers/mcp-server'
     )
     if (!mcpApp?.mockMcp || !mcpApp?.expressApp) {

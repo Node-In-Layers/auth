@@ -29,7 +29,7 @@ export default async (): Promise<Config> => {
     systemName: 'test-mcp-server',
     [CoreNamespace.root]: {
       // @ts-ignore
-      apps: await Promise.all([
+      domains: await Promise.all([
         secretsConfig,
         dataDomain,
         mcpServerDomain,
