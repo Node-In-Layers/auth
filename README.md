@@ -127,27 +127,34 @@ npm install @node-in-layers/auth
 ```typescript
 import { CoreNamespace } from '@node-in-layers/core'
 import { DataNamespace } from '@node-in-layers/data'
+import * as dataDomain from '@node-in-layers/data'
 import { AuthNamespace, LoginApproachServiceName } from '@node-in-layers/auth'
+import * as authCore from '@node-in-layers/auth/core/index.js'
 
-// Only needed for API.
-import { authModelCrudsOverrides } from '@node-in-layers/auth/api/index.js'
+// The following are for Backends Only
+import * as mcpServerDomain  from '@node-in-layers/mcp-server'
+// If using rest api instead of MCP use the following
+//import * as restServerDomain  from '@node-in-layers/rest-api'
+import * as authApi, { authModelCrudsOverrides } from '@node-in-layers/auth/api/index.js'
 
 const config = {
   [CoreNamespace.root]: {
     domains: [
-      await import('@node-in-layers/data/index.js'),
+      dataDomain,
 
+      // Backends Only
       // Add "Transport" Layer (rest-api or mcp-server)
-      await import('@node-in-layers/mcp-server/index.js'),
-      //await import('@node-in-layers/rest-api/index.js'),
+      mcpServerDomain,
+      // restServerDomain,
 
       // ALWAYS needed. (Front or backend)
-      await import('@node-in-layers/auth/core/index.js'), // core models + core services/features
+      authCore, // core models + core services/features
 
-      // Only needed on a backend/api
-      await import('@node-in-layers/auth/api/index.js'), // login/authenticate + transport auth wiring
+      // Backend Only
+      // contains login/authenticate + transport auth wiring
+      authApi,
     ],
-    layerOrder: ['services', 'features', 'express'], // or ['services', 'features', 'mcp']
+    layerOrder: ['services', 'features', 'mcp'], // or ['services', 'features', 'express']
     modelFactory: '@node-in-layers/data',
     modelCruds: true,
 
@@ -162,7 +169,7 @@ const config = {
     allowPasswordAuthentication: true,
   },
 
-  // API Configurations (ONLY for backend APIS)
+  // API Configurations (ONLY for backend Apis)
   [AuthNamespace.Api]: {
     // Optional: skip policy middleware (see Authorization section).
     // authorization: { skipAllAuthorization: true },
@@ -170,6 +177,7 @@ const config = {
     // Everything for authentication lives under authentication (like authorization).
     authentication: {
       loginApproaches: [
+        // Choose approved authentications
         LoginApproachServiceName.ApiKeyAuthLogin,
         LoginApproachServiceName.BasicAuthLogin,
         LoginApproachServiceName.OidcAuthLogin,
@@ -647,7 +655,7 @@ flowchart TD
 
 ## REST + MCP Transport Behavior
 
-When integrated with REST or MCP hosts:
+When integrated with REST or MCP servers:
 
 - If OAuth pass-through is enabled with no login approaches, login/refresh routes and the login tool are omitted; cleanup and protected routes still apply.
 - Otherwise: login (`POST /login`) and refresh (`POST /token/refresh`) routes are registered as unprotected.
@@ -655,15 +663,109 @@ When integrated with REST or MCP hosts:
 - Protected routes require `Authorization: Bearer <system-jwt>`.
 - You can add unprotected and protected routes explicitly.
 
+REST responses preserve HTTP status codes and return the standard
+`ErrorObject` JSON shape for authentication and execution failures. The
+`@node-in-layers/rest-client` feature services normalize those responses so
+REST consumers receive an `ErrorObject` result, just as MCP consumers do.
+
 ### Additional Route Registration
 
-Both transport adapters support:
+Both transport adapters (REST/MCP) support:
 
 - `addUnprotectedRoute(path, method, handler)`
 - `addCustomProtectedRoute(path, method, handler)`
 - `addPreRouteMiddleware(middleware)`
 
-Use these to keep health/login/public endpoints open while protecting business endpoints.
+Use these to keep health/login/public endpoints open while protecting business
+endpoints. The route rule is the same for REST and MCP; the transport adapter
+handles the Express or MCP registration details:
+
+1. Routes are protected by the authentication middleware by default.
+2. Register a route with `addUnprotectedRoute` when it must be callable without
+   a Bearer token, such as health checks or a custom public endpoint.
+3. Register a route with `addCustomProtectedRoute` when it must require
+   authentication.
+4. Login and refresh are registered as unprotected automatically when normal
+   login approaches are configured. OAuth pass-through mode omits those routes.
+
+#### Examples:
+
+##### Rest Api:
+
+For example, register a public health endpoint from the application layer:
+
+```typescript
+// src/yourDomain/express.ts
+import { ExpressContext } from '@node-in-layers/rest-api'
+import { AuthNamespace, type ApiExpressLayer } from '@node-in-layers/auth'
+
+export const create = (context: ExpressContext<ApiExpressLayer>) => {
+  context.express[AuthNamespace.Api].addUnprotectedRoute(
+    '/health',
+    'GET',
+    async (_req, res) => {
+      res.json({ ok: true })
+    }
+  )
+  return {}
+}
+```
+
+For a protected route, use the normal REST API route registration. When the
+authentication middleware is enabled, routes are protected by default:
+
+```typescript
+// src/yourDomain/express.ts
+import { ExpressContext, RestApiNamespace } from '@node-in-layers/rest-api'
+import { type ApiExpressLayer } from '@node-in-layers/auth'
+
+export const create = (context: ExpressContext<ApiExpressLayer>) => {
+  context.express[RestApiNamespace.express].addRoute(
+    'get',
+    '/orders/:id',
+    async (req, res) => {
+      res.json({ orderId: req.params.id })
+    }
+  )
+  return {}
+}
+```
+
+`GET /orders/:id` requires a valid `Authorization: Bearer <system-jwt>`
+header. `addCustomProtectedRoute` is also available through the auth adapter,
+but should not be used together with a direct `addRoute()` registration for
+the same endpoint.
+
+##### MCP
+
+For example, register a public health endpoint from the application layer:
+
+```typescript
+// src/yourDomain/mcp.ts
+import type { Config } from '@node-in-layers/core'
+import type { McpContext } from '@node-in-layers/mcp-server'
+import { AuthNamespace, type ApiMcpLayer } from '@node-in-layers/auth'
+
+export const create = (
+  context: McpContext<Config, object, ApiMcpLayer['mcp']>
+) => {
+  context.mcp[AuthNamespace.Api].addUnprotectedRoute(
+    '/health',
+    'GET',
+    async (_req, res) => {
+      res.json({ ok: true })
+    }
+  )
+  return {}
+}
+```
+
+Requests to `GET /health` will reach the handler without a Bearer token. The
+same `addUnprotectedRoute` operation is available through the MCP transport
+adapter; the adapter handles the transport-specific registration.
+
+This route protection is authentication only. It does not provide
+feature-specific policy authorization.
 
 ## Custom User Model Support
 

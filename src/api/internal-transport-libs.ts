@@ -103,15 +103,20 @@ export const createProtectedMiddleware =
       return
     }
 
-    const authResult = await authenticate(token)
-    if (isErrorObject(authResult)) {
-      res.status(NOT_AUTHORIZED).json(authResult)
-      return
-    }
+    await Promise.resolve(authenticate(token))
+      .then(authResult => {
+        if (isErrorObject(authResult)) {
+          res.status(NOT_AUTHORIZED).json(authResult)
+          return
+        }
 
-    // eslint-disable-next-line require-atomic-updates, functional/immutable-data
-    req.user = authResult
-    next()
+        // eslint-disable-next-line require-atomic-updates, functional/immutable-data
+        req.user = authResult
+        next()
+      })
+      .catch(error => {
+        res.status(NOT_AUTHORIZED).json(toUnauthorized(error))
+      })
   }
 
 const _isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -184,15 +189,20 @@ const _ensureAuthorizedRequest = async (
     return
   }
 
-  const authResult = await authenticate(token)
-  if (isErrorObject(authResult)) {
-    res.status(NOT_AUTHORIZED).json(authResult)
-    return
-  }
+  await Promise.resolve(authenticate(token))
+    .then(authResult => {
+      if (isErrorObject(authResult)) {
+        res.status(NOT_AUTHORIZED).json(authResult)
+        return
+      }
 
-  // eslint-disable-next-line require-atomic-updates, functional/immutable-data
-  req.user = authResult
-  next()
+      // eslint-disable-next-line require-atomic-updates, functional/immutable-data
+      req.user = authResult
+      next()
+    })
+    .catch(error => {
+      res.status(NOT_AUTHORIZED).json(toUnauthorized(error))
+    })
 }
 
 export const createMcpProtectedMiddleware =
@@ -253,14 +263,14 @@ export const createLoginHandler =
     const userAgentRaw = req.headers['user-agent']
     const userAgent =
       typeof userAgentRaw === 'string' ? userAgentRaw : userAgentRaw?.[0]
-    const result = await login(
-      {
-        request,
-        ip: req.ip,
-        userAgent,
-      },
-      crossLayerProps
-    )
+    const loginProps = {
+      request,
+      ip: req.ip,
+      userAgent,
+    }
+    const result = !crossLayerProps
+      ? await login(loginProps)
+      : await login(loginProps, crossLayerProps)
     if (isErrorObject(result)) {
       res.status(NOT_AUTHORIZED).json(result)
       return
@@ -278,14 +288,14 @@ export const createRefreshHandler =
     const userAgentRaw = req.headers['user-agent']
     const userAgent =
       typeof userAgentRaw === 'string' ? userAgentRaw : userAgentRaw?.[0]
-    const result = await refresh(
-      {
-        request,
-        ip: req.ip,
-        userAgent,
-      },
-      crossLayerProps
-    )
+    const refreshProps = {
+      request,
+      ip: req.ip,
+      userAgent,
+    }
+    const result = !crossLayerProps
+      ? await refresh(refreshProps)
+      : await refresh(refreshProps, crossLayerProps)
     if (isErrorObject(result)) {
       res.status(NOT_AUTHORIZED).json(result)
       return

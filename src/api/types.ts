@@ -205,7 +205,9 @@ export type ApiMcp = Readonly<{
 
 /** Layer shape exposing API MCP host under the auth API namespace. */
 export type ApiMcpLayer = Readonly<{
-  [AuthNamespace.Api]: ApiMcp
+  mcp: Readonly<{
+    [AuthNamespace.Api]: ApiMcp
+  }>
 }>
 
 /**
@@ -224,5 +226,7 @@ export type ApiExpress = Readonly<{
 
 /** Layer shape exposing API Express transport under the auth API namespace. */
 export type ApiExpressLayer = Readonly<{
-  [AuthNamespace.Api]: ApiExpress
+  express: Readonly<{
+    [AuthNamespace.Api]: ApiExpress
+  }>
 }>

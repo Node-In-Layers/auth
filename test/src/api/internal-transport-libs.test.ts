@@ -176,6 +176,27 @@ describe('/src/api/internal-transport-libs.ts', () => {
       assert.isTrue(next.notCalled)
     })
 
+    it('should return an ErrorObject when authentication rejects', async () => {
+      const authenticate = sinon
+        .stub()
+        .rejects(new Error('token service failed'))
+      const middleware = createProtectedMiddleware([], authenticate)
+
+      const req: any = {
+        path: '/protected',
+        method: 'GET',
+        headers: { authorization: 'Bearer token' },
+      }
+      const res = createMockRes()
+      const next = sinon.stub()
+
+      await middleware(req, res, next)
+
+      assert.isTrue(res.status.calledOnceWith(NOT_AUTHORIZED))
+      assert.isTrue(isErrorObject(res.json.firstCall.args[0]))
+      assert.isTrue(next.notCalled)
+    })
+
     it('should attach user and call next when authentication succeeds', async () => {
       const user = { id: 'user-1' } as unknown as User
       const authenticate = sinon.stub().resolves(user)

@@ -622,7 +622,12 @@ const _createMockRestApi = () => {
     addRoute: sinon
       .stub()
       .callsFake((method: string, route: string, func: any) => {
-        ;(expressApp as any)[method.toLowerCase()](route, func)
+        ;(expressApp as any)[method.toLowerCase()](
+          route,
+          async (req: any, res: any) => {
+            await Promise.resolve(func(req, res, req._crossLayerProps))
+          }
+        )
       }),
   }
   const expressLayer = {

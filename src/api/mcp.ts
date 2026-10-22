@@ -1,6 +1,6 @@
 import { Config, FeaturesContext } from '@node-in-layers/core'
 import { JsonObj } from 'functional-models'
-import { ZodSchema } from 'zod'
+import { z } from 'zod'
 import { AuthNamespace, type ApiConfig } from '../types.js'
 import type {
   ApiFeaturesLayer,
@@ -82,8 +82,8 @@ export const create = (context: _McpContext): ApiMcp => {
   type ServerTool = {
     name: string
     description: string
-    inputSchema: ZodSchema
-    outputSchema?: ZodSchema
+    inputSchema: z.ZodType
+    outputSchema?: z.ZodType
     execute: (input: any) => Promise<CallToolResult>
   }
 
