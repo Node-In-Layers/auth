@@ -329,6 +329,11 @@ describe('/src/api/internal-transport-libs.ts', () => {
       const result = { ok: true } as any
       const login = sinon.stub().resolves(result)
       const handler = createLoginHandler(login)
+      const crossLayerProps = {
+        logging: {
+          ids: [{ requestId: 'req-1' }],
+        },
+      }
 
       const req: any = {
         body: { field: 'value' },
@@ -337,14 +342,17 @@ describe('/src/api/internal-transport-libs.ts', () => {
       }
       const res = createMockRes()
 
-      await handler(req, res)
+      await handler(req, res, crossLayerProps as any)
 
       assert.isTrue(
-        login.calledOnceWith({
-          request: { field: 'value' },
-          ip: '127.0.0.1',
-          userAgent: 'agent',
-        })
+        login.calledOnceWith(
+          {
+            request: { field: 'value' },
+            ip: '127.0.0.1',
+            userAgent: 'agent',
+          },
+          crossLayerProps
+        )
       )
       assert.isTrue(res.status.notCalled)
       assert.isTrue(res.json.calledOnceWith(result))
@@ -374,6 +382,11 @@ describe('/src/api/internal-transport-libs.ts', () => {
       const result = { refreshed: true } as any
       const refresh = sinon.stub().resolves(result)
       const handler = createRefreshHandler(refresh)
+      const crossLayerProps = {
+        logging: {
+          ids: [{ requestId: 'req-1' }],
+        },
+      }
 
       const req: any = {
         body: { field: 'value' },
@@ -382,14 +395,17 @@ describe('/src/api/internal-transport-libs.ts', () => {
       }
       const res = createMockRes()
 
-      await handler(req, res)
+      await handler(req, res, crossLayerProps as any)
 
       assert.isTrue(
-        refresh.calledOnceWith({
-          request: { field: 'value' },
-          ip: '127.0.0.1',
-          userAgent: 'agent',
-        })
+        refresh.calledOnceWith(
+          {
+            request: { field: 'value' },
+            ip: '127.0.0.1',
+            userAgent: 'agent',
+          },
+          crossLayerProps
+        )
       )
       assert.isTrue(res.status.notCalled)
       assert.isTrue(res.json.calledOnceWith(result))

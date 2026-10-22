@@ -1,9 +1,13 @@
 import sinon from 'sinon'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import merge from 'lodash/merge.js'
 import { decodeJwt } from 'jose'
 import express from 'express'
 import supertest from 'supertest'
 import {
+  After,
+  BeforeAll,
   Given,
   When,
   Then,
@@ -20,14 +24,17 @@ import {
   ModelCrudsFunctions,
 } from '@node-in-layers/core'
 import {
-  api,
   ApiServicesLayer,
   auth,
   AuthConfig,
   AuthNamespace,
   LoginApproachServiceName,
 } from '../../src'
-import { OAuthPassthroughValidateMode } from '../../src/types.js'
+import * as api from '../../src/api/index.js'
+import {
+  OAuthPassthroughValidateMode,
+  TokenExchangeClientAuth,
+} from '../../src/types.js'
 import { DataConfig, DataNamespace } from '@node-in-layers/data/types'
 import {
   createMcpResponse,
@@ -43,19 +50,223 @@ import {
   LastModifiedDateProperty,
 } from 'functional-models'
 import { User, ApiKey } from '../../src/core/types'
-import { GenericContainer, StartedTestContainer, Wait } from 'testcontainers'
+import {
+  GenericContainer,
+  Network,
+  StartedNetwork,
+  StartedTestContainer,
+  Wait,
+} from 'testcontainers'
 import { create as createMcpAuth } from '../../src/api/mcp'
 import { create as createExpressAuth } from '../../src/api/express'
+import { createClient as createAuthMcpClient } from '../../src/mcp-client/entries.js'
+import {
+  McpClientNamespace,
+  data as mcpClientData,
+  mcp as mcpClientMcp,
+  McpClientFeaturesLayer,
+  McpServicesLayer,
+} from '@node-in-layers/mcp-client'
 import { z } from 'zod'
 
 setDefaultTimeout(120_000)
+
+const _execFile = promisify(execFile)
+const _TEST_MCP_SERVER_IMAGE = 'auth-test-mcp-server:latest'
+const _TEST_MCP_SERVER_LABEL = 'node-in-layers.auth.test-mcp-server'
+const _TEST_MCP_SERVER_LABEL_VALUE = 'true'
+const _TEST_MCP_SERVER_PORT = 3000
+const _TEST_MCP_SERVER_USER = {
+  email: 'testuser@example.com',
+  username: 'testuser',
+  firstName: 'Test',
+  lastName: 'User',
+  enabled: true,
+}
+let _testMcpServerImageTag: string | undefined
+
+const _stopTestMcpServerContainers = async () => {
+  const label = `${_TEST_MCP_SERVER_LABEL}=${_TEST_MCP_SERVER_LABEL_VALUE}`
+  const result = await _execFile('docker', [
+    'ps',
+    '-aq',
+    '--filter',
+    `label=${label}`,
+  ])
+  const containerIds = result.stdout
+    .split('\n')
+    .map(value => value.trim())
+    .filter(Boolean)
+  if (containerIds.length === 0) {
+    return
+  }
+  await _execFile('docker', ['rm', '-f', ...containerIds])
+}
+
+const _requireTestMcpServerImage = () => {
+  if (!_testMcpServerImageTag) {
+    throw new Error('test-mcp-server image has not been built')
+  }
+  return _testMcpServerImageTag
+}
+
+const _createTestMcpClient = async (port: number) => {
+  const baseUrl = `http://localhost:${port}`
+
+  const protectedDomain = {
+    name: 'protected',
+    features: {
+      create: (context: FeaturesContext<any, McpServicesLayer>) => {
+        const myProtectedFeature = context.services[
+          McpClientNamespace.mcp
+        ].createMcpFeature({
+          functionName: 'myProtectedFeature',
+          domain: 'protected',
+          description: 'This is a protected Hello World',
+          args: z.object({
+            name: z.string(),
+          }),
+          returns: z.object({
+            greeting: z.string(),
+          }),
+        })
+        return {
+          myProtectedFeature,
+        }
+      },
+    },
+  }
+
+  const unprotectedDomain = {
+    name: 'unprotected',
+    features: {
+      create: (context: FeaturesContext<any, McpServicesLayer>) => {
+        const myUnprotectedFeature = context.services[
+          McpClientNamespace.mcp
+        ].createMcpFeature({
+          functionName: 'myUnprotectedFeature',
+          domain: 'unprotected',
+          description: 'This is an unprotected Hello World',
+          args: z.object({
+            name: z.string(),
+          }),
+          returns: z.object({
+            greeting: z.string(),
+          }),
+        })
+        return {
+          myUnprotectedFeature,
+        }
+      },
+    },
+  }
+
+  return createAuthMcpClient<any>({
+    environment: 'cucumber-test',
+    systemName: 'auth-mcp-client-cucumber',
+    [CoreNamespace.root]: {
+      domains: [],
+      layerOrder: ['services', 'features', 'mcp'],
+      logging: {
+        logFormat: LogFormat.json,
+        logLevel: LogLevelNames.silent,
+      },
+      modelFactory: McpClientNamespace.data,
+      modelCruds: true,
+    },
+    [AuthNamespace.Api]: {
+      authentication: {
+        clientBaseUrl: baseUrl,
+        loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+      },
+    },
+    [AuthNamespace.Client]: {
+      baseUrl,
+    },
+    [McpClientNamespace.client]: {
+      domains: [
+        mcpClientData,
+        mcpClientMcp,
+        protectedDomain,
+        unprotectedDomain,
+      ],
+      mcp: {
+        connection: {
+          type: 'http',
+          url: baseUrl,
+        },
+      },
+    },
+  })
+}
+
+const _seedTestMcpServerUser = async (container: StartedTestContainer) => {
+  const seedResult = await container.exec([
+    'node',
+    '-e',
+    "console.info(require('fs').readFileSync('/app/test-mcp-server/test-data/default.json','utf8'))",
+  ])
+  if (seedResult.exitCode !== 0) {
+    throw new Error(
+      `Failed to inspect test-mcp-server seed file: ${seedResult.stderr || seedResult.output}`
+    )
+  }
+  if (!seedResult.stdout.includes(_TEST_MCP_SERVER_USER.email)) {
+    throw new Error(
+      `test-mcp-server seed user missing. Seed file: ${seedResult.stdout || seedResult.output}`
+    )
+  }
+}
+
+const _executeMcpClientFeature = async (
+  client: any,
+  domain: string,
+  featureName: string,
+  args: Record<string, unknown>
+) => {
+  const feature = client?.[domain]?.[featureName]
+  if (typeof feature === 'function') {
+    return feature(args)
+  }
+  const mcp = client?.[McpClientNamespace.mcp] || client
+  if (typeof mcp.executeTool === 'function') {
+    return mcp.executeTool('execute_feature', {
+      domain,
+      featureName,
+      args,
+    })
+  }
+  if (typeof mcp.executeMcpFeature === 'function') {
+    return mcp.executeMcpFeature(
+      {
+        domain,
+        functionName: featureName,
+      },
+      args
+    )
+  }
+  throw new Error('mcp-client does not expose executeTool or executeMcpFeature')
+}
 
 type _World = {
   context?: any
   result?: any
   mcpState?: _McpState
   expressState?: _ExpressState
+  testMcpServerContainer?: StartedTestContainer
+  testMcpServerPort?: number
+  mcpClient?: any
+  mcpClientAuthState?: any
   expectedAuthorization?: string
+  /** Subject token (e.g. Dex password-grant access token) for RFC 8693 scenarios */
+  subjectToken?: string
+  /** Result of `exchangeAccessToken` */
+  exchangeResult?: {
+    accessToken: string
+    tokenType?: string
+    expiresInSeconds?: number
+    scope?: string
+  }
 }
 
 type _ContextFactory = () => Promise<any>
@@ -97,6 +308,146 @@ const _OIDC_SUB = 'oidc-sub-123'
 let _oidcProvider: _OidcProvider | undefined
 let _oidcTokenCache: string | undefined
 let _oidcTokenSubCache: string | undefined
+
+type _TokenExchangeDexProvider = {
+  network: StartedNetwork
+  upstreamContainer: StartedTestContainer
+  exchangeContainer: StartedTestContainer
+  /** Password-grant tokens (subject) come from upstream; iss matches upstream issuer. */
+  passwordTokenEndpoint: string
+  /** RFC 8693 against the exchange Dex. */
+  tokenEndpoint: string
+  /** Issuer on tokens minted by the exchange Dex (assert on exchanged JWT `iss`). */
+  issuer: string
+}
+
+/** Two Dex containers: upstream (password grant only) + exchange (RFC 8693 + OIDC→upstream). */
+let _tokenExchangeDexProvider: _TokenExchangeDexProvider | undefined
+
+/** Set `CUCUMBER_TOKEN_EXCHANGE_DEBUG=1` to see where time goes (Dex is before loadSystem). */
+const _logTokenExchangeDebug = (...args: unknown[]) => {
+  if (process.env.CUCUMBER_TOKEN_EXCHANGE_DEBUG) {
+    console.error('[token-exchange]', ...args)
+  }
+}
+
+const _ensureTokenExchangeDex =
+  async (): Promise<_TokenExchangeDexProvider> => {
+    if (_tokenExchangeDexProvider) {
+      _logTokenExchangeDebug('reusing existing Dex containers')
+      return _tokenExchangeDexProvider
+    }
+    _logTokenExchangeDebug(
+      'starting Dex pair via Testcontainers (upstream then exchange; not loadSystem)'
+    )
+    // Dex opens OIDC connectors during server.NewServer() *before* Listen(). A connector
+    // whose issuer is this same Dex therefore GETs discovery while nothing listens yet
+    // ("connection refused") and the process exits — HTTP wait then hangs forever.
+    // Split: upstream Dex serves discovery/JWKS; exchange Dex has OIDC connector → upstream.
+    const upstreamIssuer = 'http://oidc-upstream:5556/dex'
+    const exchangeIssuer = 'http://127.0.0.1:5556/dex'
+    const staticBlock = `
+staticClients:
+  - id: feature-test-client
+    secret: feature-test-client-secret
+    name: Feature Test Client
+    redirectURIs:
+      - http://localhost/callback
+  - id: exchange-client
+    secret: exchange-client-secret
+    name: Token Exchange Client
+    public: true
+staticPasswords:
+  - email: "admin@example.com"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: "admin"
+    userID: "${_OIDC_SUB}"
+`.trim()
+    const upstreamDexConfig = `
+issuer: ${upstreamIssuer}
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+enablePasswordDB: true
+${staticBlock}
+`.trim()
+    const exchangeDexConfig = `
+issuer: ${exchangeIssuer}
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+enablePasswordDB: true
+${staticBlock}
+connectors:
+  - type: oidc
+    id: oidc-self
+    name: self
+    config:
+      issuer: ${upstreamIssuer}
+      clientID: feature-test-client
+      clientSecret: feature-test-client-secret
+      redirectURI: http://localhost/callback
+      getUserInfo: true
+      scopes:
+        - openid
+        - profile
+        - email
+      userNameKey: sub
+`.trim()
+    const network = await new Network().start()
+    _logTokenExchangeDebug('starting upstream Dex …')
+    const upstreamContainer = await new GenericContainer(
+      'ghcr.io/dexidp/dex:v2.41.1'
+    )
+      .withNetwork(network)
+      .withNetworkAliases('oidc-upstream')
+      .withExposedPorts(5556)
+      .withCopyContentToContainer([
+        { content: upstreamDexConfig, target: '/etc/dex/config.yaml' },
+      ])
+      .withCommand(['dex', 'serve', '/etc/dex/config.yaml'])
+      .withWaitStrategy(
+        Wait.forHttp('/dex/.well-known/openid-configuration', 5556)
+      )
+      .withStartupTimeout(90_000)
+      .start()
+    _logTokenExchangeDebug('upstream Dex is up; starting exchange Dex …')
+    const exchangeContainer = await new GenericContainer(
+      'ghcr.io/dexidp/dex:v2.41.1'
+    )
+      .withNetwork(network)
+      .withExposedPorts(5556)
+      .withCopyContentToContainer([
+        { content: exchangeDexConfig, target: '/etc/dex/config.yaml' },
+      ])
+      .withCommand(['dex', 'serve', '/etc/dex/config.yaml'])
+      .withWaitStrategy(
+        Wait.forHttp('/dex/.well-known/openid-configuration', 5556)
+      )
+      .withStartupTimeout(90_000)
+      .start()
+    _logTokenExchangeDebug('exchange Dex is up (wait strategy passed)')
+    const host = upstreamContainer.getHost()
+    const upstreamBaseUrl = `http://${host}:${upstreamContainer.getMappedPort(5556)}`
+    const exchangeBaseUrl = `http://${host}:${exchangeContainer.getMappedPort(5556)}`
+    _tokenExchangeDexProvider = {
+      network,
+      upstreamContainer,
+      exchangeContainer,
+      passwordTokenEndpoint: `${upstreamBaseUrl}/dex/token`,
+      tokenEndpoint: `${exchangeBaseUrl}/dex/token`,
+      issuer: exchangeIssuer,
+    }
+    return _tokenExchangeDexProvider
+  }
 
 const _createMockMcp = () => {
   const expressApp = express()
@@ -218,10 +569,10 @@ const _createMockMcp = () => {
             return
           }
           if (result && typeof result === 'object') {
-            if (!req.extendedCrossLayerProps) {
-              req.extendedCrossLayerProps = {}
+            if (!req._crossLayerProps) {
+              req._crossLayerProps = {}
             }
-            Object.assign(req.extendedCrossLayerProps, result)
+            Object.assign(req._crossLayerProps, result)
           }
           next()
         } catch (e) {
@@ -383,19 +734,24 @@ const _createSystem = async (
 ): Promise<any> => {
   const transportApp =
     transport === 'mcp' ? _createMockMcp() : _createMockRestApi()
+  const apiApp = {
+    name: api.name,
+    services: api.services,
+    features: api.features,
+  }
   const config: AuthConfig = merge(
     {
       systemName: '@node-in-layers/auth/features-test',
       environment: 'cucumber-test',
       [CoreNamespace.root]: {
-        apps: [
+        domains: [
           // Provides us data backbone.
           await import('@node-in-layers/data/index.js'),
           transportApp,
           // Provides us models.
           auth,
           // Provides api features (login/authenticate).
-          api,
+          apiApp,
           ...extraApps,
         ],
         layerOrder: ['services', 'features', ['express', 'mcp']],
@@ -552,7 +908,11 @@ const _CONTEXT: Record<string, _ContextFactory> = {
       [AuthNamespace.Api]: {
         authentication: {
           loginApproaches: [LoginApproachServiceName.OidcAuthLogin],
-          jwksUris: [provider.jwksUri],
+          oauth: {
+            oidc: {
+              jwksUris: [provider.jwksUri],
+            },
+          },
           jwtIssuer: provider.issuer,
           jwtAudience: 'feature-test-client',
           jwtSecret: undefined,
@@ -676,12 +1036,16 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         [AuthNamespace.Api]: {
           authentication: {
             loginApproaches: [],
-            oauthPassthrough: {
-              enabled: true,
-              validateMode: OAuthPassthroughValidateMode.Jwks,
-              autoProvision: true,
+            oauth: {
+              passthrough: {
+                enabled: true,
+                validateMode: OAuthPassthroughValidateMode.Jwks,
+                autoProvision: true,
+              },
+              oidc: {
+                jwksUris: [provider.jwksUri],
+              },
             },
-            jwksUris: [provider.jwksUri],
             jwtIssuer: provider.issuer,
             jwtAudience: 'feature-test-client',
             jwtSecret: 'feature-test-jwt-secret',
@@ -699,12 +1063,16 @@ const _CONTEXT: Record<string, _ContextFactory> = {
         [AuthNamespace.Api]: {
           authentication: {
             loginApproaches: [],
-            oauthPassthrough: {
-              enabled: true,
-              validateMode: OAuthPassthroughValidateMode.Jwks,
-              autoProvision: true,
+            oauth: {
+              passthrough: {
+                enabled: true,
+                validateMode: OAuthPassthroughValidateMode.Jwks,
+                autoProvision: true,
+              },
+              oidc: {
+                jwksUris: [provider.jwksUri],
+              },
             },
-            jwksUris: [provider.jwksUri],
             jwtIssuer: provider.issuer,
             jwtAudience: 'feature-test-client',
             jwtSecret: 'feature-test-jwt-secret',
@@ -714,6 +1082,50 @@ const _CONTEXT: Record<string, _ContextFactory> = {
       [_createPassthroughProbeApp()],
       'rest'
     )
+  },
+  'token-exchange-dex': async () => {
+    _logTokenExchangeDebug(
+      'context token-exchange-dex: before _ensureTokenExchangeDex()'
+    )
+    const provider = await _ensureTokenExchangeDex()
+    _logTokenExchangeDebug(
+      'context token-exchange-dex: after _ensureTokenExchangeDex(), before _createSystem()',
+      provider.tokenEndpoint
+    )
+    const system = await _createSystem({
+      [AuthNamespace.Api]: {
+        authentication: {
+          loginApproaches: [],
+          passwordHashSecretKey: 'feature-test-password-pepper',
+          jwtSecret: 'feature-test-jwt-secret',
+          jwtIssuer: 'feature-tests',
+          jwtAudience: 'feature-tests',
+          jwtExpiresInSeconds: 5000,
+          oauth: {
+            tokenExchange: {
+              enabled: true,
+              tokenEndpoint: provider.tokenEndpoint,
+              clientAuth: TokenExchangeClientAuth.ClientSecretBasic,
+              clientId: 'exchange-client',
+              clientSecret: 'exchange-client-secret',
+              defaultScope: 'openid profile email',
+              extraParams: {
+                connector_id: 'oidc-self',
+                requested_token_type:
+                  'urn:ietf:params:oauth:token-type:access_token',
+              },
+              targets: {
+                secondary: {
+                  scope: 'openid profile',
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    _logTokenExchangeDebug('context token-exchange-dex: after _createSystem()')
+    return system
   },
 }
 
@@ -1050,9 +1462,6 @@ const _assert = (condition: unknown, message: string): void => {
 }
 
 const _assertLoginSuccess = (result: any, expectedApproach: string): void => {
-  if (_isErrorObject(result)) {
-    console.error(JSON.stringify(result, null, 2))
-  }
   _assert(
     !_isErrorObject(result),
     'Expected successful login result, got error'
@@ -1357,7 +1766,7 @@ Given(
     }
     this.context = await createContext()
 
-    const expressApp = this.context.config[CoreNamespace.root].apps.find(
+    const expressApp = this.context.config[CoreNamespace.root].domains.find(
       (x: any) => x.name === '@node-in-layers/rest-api/express'
     )
     if (!expressApp?.mockExpress || !expressApp?.expressApp) {
@@ -1425,7 +1834,7 @@ Given(
     }
     this.context = await createContext()
 
-    const mcpApp = this.context.config[CoreNamespace.root].apps.find(
+    const mcpApp = this.context.config[CoreNamespace.root].domains.find(
       (x: any) => x.name === '@node-in-layers/mcp-server'
     )
     if (!mcpApp?.mockMcp || !mcpApp?.expressApp) {
@@ -1711,11 +2120,347 @@ Then(
   }
 )
 
+When(
+  'we obtain a dex password access token for token exchange',
+  async function (this: _World) {
+    const provider = await _ensureTokenExchangeDex()
+    const body = new URLSearchParams({
+      grant_type: 'password',
+      username: 'admin@example.com',
+      password: 'password',
+      scope: 'openid profile email',
+      client_id: 'feature-test-client',
+      client_secret: 'feature-test-client-secret',
+    })
+    const response = await fetch(provider.passwordTokenEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`Dex password grant failed (${response.status}): ${text}`)
+    }
+    const json = (await response.json()) as { access_token?: string }
+    if (!json.access_token) {
+      throw new Error('Dex password response missing access_token')
+    }
+    this.subjectToken = json.access_token
+  }
+)
+
+When(
+  'we exchange the subject token for a downstream access token using api services',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    if (!this.subjectToken) {
+      throw new Error(
+        'Missing subject token. Run the dex password token step first.'
+      )
+    }
+    const api = this.context.services[AuthNamespace.Api]
+    this.exchangeResult = await api.exchangeAccessToken(
+      { subjectToken: this.subjectToken },
+      {}
+    )
+  }
+)
+
+When(
+  'we exchange using incoming Authorization bearer as subject token',
+  async function (this: _World) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    if (!this.subjectToken) {
+      throw new Error(
+        'Missing subject token. Run the dex password token step first.'
+      )
+    }
+    const api = this.context.services[AuthNamespace.Api]
+    const crossLayerProps = {
+      requestInfo: {
+        headers: {
+          Authorization: `Bearer ${this.subjectToken}`,
+        },
+      },
+    }
+    this.exchangeResult = await api.exchangeAccessToken({}, crossLayerProps)
+  }
+)
+
+When(
+  'we exchange the subject token using named target {string}',
+  async function (this: _World, targetName: string) {
+    if (!this.context) {
+      throw new Error('Context not set.')
+    }
+    if (!this.subjectToken) {
+      throw new Error(
+        'Missing subject token. Run the dex password token step first.'
+      )
+    }
+    const api = this.context.services[AuthNamespace.Api]
+    this.exchangeResult = await api.exchangeAccessToken(
+      { target: targetName, subjectToken: this.subjectToken },
+      {}
+    )
+  }
+)
+
+Then(
+  'the token exchange result should be issued by dex',
+  async function (this: _World) {
+    const provider = await _ensureTokenExchangeDex()
+    const token = this.exchangeResult?.accessToken
+    _assert(
+      typeof token === 'string' && token.length > 0,
+      'expected non-empty access_token from token exchange'
+    )
+    const payload = decodeJwt(token!)
+    _assert(
+      payload.iss === provider.issuer,
+      `expected Dex issuer ${provider.issuer}, got ${String(payload.iss)}`
+    )
+  }
+)
+
+BeforeAll(async function () {
+  await _stopTestMcpServerContainers()
+  await GenericContainer.fromDockerfile(
+    '.',
+    'test-mcp-server/Dockerfile'
+  ).build(_TEST_MCP_SERVER_IMAGE, { deleteOnExit: false })
+  _testMcpServerImageTag = _TEST_MCP_SERVER_IMAGE
+})
+
+After(async function (this: _World) {
+  if (this.testMcpServerContainer) {
+    await this.testMcpServerContainer.stop()
+    this.testMcpServerContainer = undefined
+  }
+  this.testMcpServerPort = undefined
+  this.mcpClient = undefined
+})
+
+Given('we use the test-mcp-server', async function (this: _World) {
+  const container = await new GenericContainer(_requireTestMcpServerImage())
+    .withLabels({
+      [_TEST_MCP_SERVER_LABEL]: _TEST_MCP_SERVER_LABEL_VALUE,
+    })
+    .withExposedPorts(_TEST_MCP_SERVER_PORT)
+    .withWaitStrategy(Wait.forLogMessage('Starting MCP server'))
+    .withStartupTimeout(60_000)
+    .start()
+  this.testMcpServerContainer = container
+  this.testMcpServerPort = container.getMappedPort(_TEST_MCP_SERVER_PORT)
+  await _seedTestMcpServerUser(container)
+  this.mcpClient = await _createTestMcpClient(this.testMcpServerPort)
+})
+
+When(
+  'we mcp-client login with email {string} and password {string}',
+  async function (this: _World, email: string, password: string) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.result = await this.mcpClient
+      .login({
+        basicAuth: {
+          identifier: email,
+          password,
+        },
+      })
+      .catch((error: any) => {
+        throw new Error(
+          `mcp-client login failed: ${JSON.stringify(error?.response?.data ?? error, null, 2)}`
+        )
+      })
+  }
+)
+
+When(
+  'we mcp-client login with api key {string}',
+  async function (this: _World, apiKey: string) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.result = await this.mcpClient
+      .login({
+        apiKeyAuth: {
+          key: apiKey,
+        },
+      })
+      .catch((error: any) => {
+        throw new Error(
+          `mcp-client api key login failed: ${JSON.stringify(error?.response?.data ?? error, null, 2)}`
+        )
+      })
+  }
+)
+
+When('we mcp-client refresh the token', async function (this: _World) {
+  if (!this.mcpClient) {
+    throw new Error(
+      'MCP client not set. Run "Given we use the test-mcp-server" first.'
+    )
+  }
+  const refreshToken = this.result?.refreshToken
+  this.result = await this.mcpClient.refresh({ refreshToken })
+})
+
+When(
+  'we replace mcp-client with a new client without auth state',
+  async function (this: _World) {
+    if (!this.mcpClient || !this.testMcpServerPort) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.mcpClientAuthState = await this.mcpClient.getState()
+    this.mcpClient = await _createTestMcpClient(this.testMcpServerPort)
+  }
+)
+
+When(
+  'we set mcp-client state from previous auth state',
+  async function (this: _World) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    if (!this.mcpClientAuthState) {
+      throw new Error('Previous MCP client auth state not set.')
+    }
+    await this.mcpClient.setState(this.mcpClientAuthState)
+  }
+)
+
+When(
+  'we call mcp-client unprotected feature with name {string}',
+  async function (this: _World, name: string) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.result = await _executeMcpClientFeature(
+      this.mcpClient,
+      'unprotected',
+      'myUnprotectedFeature',
+      { name }
+    )
+  }
+)
+
+When(
+  'we attempt to call mcp-client protected feature with name {string}',
+  async function (this: _World, name: string) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.result = await _executeMcpClientFeature(
+      this.mcpClient,
+      'protected',
+      'myProtectedFeature',
+      { name }
+    ).catch((error: any) => ({ error }))
+  }
+)
+
+When(
+  'we call mcp-client protected feature with name {string}',
+  async function (this: _World, name: string) {
+    if (!this.mcpClient) {
+      throw new Error(
+        'MCP client not set. Run "Given we use the test-mcp-server" first.'
+      )
+    }
+    this.result = await _executeMcpClientFeature(
+      this.mcpClient,
+      'protected',
+      'myProtectedFeature',
+      { name }
+    )
+  }
+)
+
+Then('mcp-client request should be unauthorized', function (this: _World) {
+  const errorText = JSON.stringify(
+    this.result?.error?.message || this.result?.error || this.result,
+    null,
+    2
+  )
+  _assert(
+    errorText.includes('NOT_AUTHORIZED') ||
+      errorText.includes('Unauthorized') ||
+      errorText.includes('Missing or invalid bearer token'),
+    `expected unauthorized MCP client error, got ${errorText}`
+  )
+})
+
+Then('mcp-client login should succeed', function (this: _World) {
+  _assert(typeof this.result?.token === 'string', 'expected token')
+  _assert(
+    typeof this.result?.refreshToken === 'string',
+    'expected refresh token'
+  )
+  _assert(
+    this.result?.user?.email === _TEST_MCP_SERVER_USER.email,
+    `expected user email ${_TEST_MCP_SERVER_USER.email}`
+  )
+})
+
+Then('mcp-client refresh should succeed', function (this: _World) {
+  _assert(typeof this.result?.token === 'string', 'expected refreshed token')
+  _assert(
+    typeof this.result?.refreshToken === 'string',
+    'expected refreshed refresh token'
+  )
+  _assert(
+    this.result?.user?.email === _TEST_MCP_SERVER_USER.email,
+    `expected refreshed user email ${_TEST_MCP_SERVER_USER.email}`
+  )
+})
+
+Then(
+  'mcp-client greeting should contain {string}',
+  function (this: _World, expected: string) {
+    _assert(
+      typeof this.result?.greeting === 'string',
+      'expected greeting result'
+    )
+    _assert(
+      this.result.greeting.includes(expected),
+      `expected greeting to include "${expected}", got "${this.result.greeting}"`
+    )
+  }
+)
+
 AfterAll(async function () {
   if (_oidcProvider) {
     await _oidcProvider.container.stop()
     _oidcProvider = undefined
   }
+  if (_tokenExchangeDexProvider) {
+    const p = _tokenExchangeDexProvider
+    await p.exchangeContainer.stop()
+    await p.upstreamContainer.stop()
+    await p.network.stop()
+    _tokenExchangeDexProvider = undefined
+  }
   _oidcTokenCache = undefined
   _oidcTokenSubCache = undefined
+  await _stopTestMcpServerContainers()
+  _testMcpServerImageTag = undefined
 })

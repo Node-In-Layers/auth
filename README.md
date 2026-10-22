@@ -9,6 +9,69 @@ Drop in, fully featured, Authentication and Authorization library for Node In La
 
 This package contains common authentication and authorization types, models and routines. This includes important system building models such as users and organizations as well as resuable and extensible logic for doing authentication and authorization on features and model functions.
 
+## Auth + MCP Client Composition (direct import)
+
+If you want a composed client that merges:
+
+- `@node-in-layers/mcp-client` features/models client, and
+- `@node-in-layers/auth/client` features (`login`, `refresh`, `logout`, `getState`, `setState`)
+
+use the auth package's mcp-client entries helper via a **direct path import**:
+
+```typescript
+import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
+```
+
+Important:
+
+- Do **not** add `@node-in-layers/auth/mcp-client` to `domains` in core config.
+- This is an entries helper, not a domain you register in system config.
+- Pass the MCP client config you want to use. The helper adds the auth client domain and auth adapter wiring for you.
+
+### Services layer usage
+
+```typescript
+import { ServicesContext } from '@node-in-layers/core'
+import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
+import { McpClientNamespace } from '@node-in-layers/mcp-client/types.js'
+import * as mcp from '@node-in-layers/mcp-client/mcp/index.js'
+import * as yourDomain from '../yourDomain/index.js'
+import { AppConfig } from '../types.js'
+
+export const create = (context: ServicesContext<AppConfig>) => {
+  const buildClient = async () => {
+    return createClient({
+      [McpClientNamespace.client]: {
+        ...context.config[McpClientNamespace.client],
+        domains: [mcp, yourDomain],
+      },
+    })
+  }
+
+  return {
+    buildClient,
+  }
+}
+```
+
+### Features layer usage
+
+```typescript
+import { FeaturesContext } from '@node-in-layers/core'
+import { createClient } from '@node-in-layers/auth/mcp-client/entries.js'
+import { McpClientNamespace } from '@node-in-layers/mcp-client/types.js'
+import { AppConfig } from '../types.js'
+
+export const create = (context: FeaturesContext<AppConfig, any>) => {
+  const getSdk = async () =>
+    createClient({
+      [McpClientNamespace.client]: context.config[McpClientNamespace.client],
+    })
+
+  return { getSdk }
+}
+```
+
 # Big System Features
 
 - Ability to login a User with basic auth, OIDC, or Api Keys.
@@ -16,10 +79,41 @@ This package contains common authentication and authorization types, models and 
 - Treeshakeable Functionality, for backend / frontend uses
 - Control who can access a feature
 - Control who can access a model, any specific method on that model, and even the individual rows themselves.
+- **OAuth 2.0 token exchange (RFC 8693)** for calling downstream services **on behalf of** the caller, using **`getOnBehalfOfHttpClient`** (and optionally **`exchangeAccessToken`**).
 
 ## OAuth pass-through
 
 When pass-through is enabled, clients send an upstream Bearer (e.g. OIDC access or ID token). The API can validate it via JWKS, resolve an existing user by `iss` + `sub`, or **auto-provision** a local user and `UserAuthIdentity` on first sight if `autoProvision` is on. **`getPassthroughHttpClient`** (on API services) builds an HTTP client that forwards the same `Authorization` header from the incoming request—useful for proxying to upstream tools or APIs without swapping credentials.
+
+## OAuth token exchange (on-behalf-of)
+
+When **`authentication.oauth.tokenExchange`** is enabled, API services expose **`getOnBehalfOfHttpClient(props?, crossLayerProps)`** and **`exchangeAccessToken(props?, crossLayerProps)`**. These perform an OAuth 2.0 token exchange at your configured token endpoint: the **subject token** is the incoming request’s Bearer (from `crossLayerProps`), unless you pass **`subjectToken`** in `props`. The result is a **downstream access token** you can use to call another API as that user.
+
+**From a feature:** resolve auth API services from your features context (same pattern as other API services), pass **`crossLayerProps`** from the feature invocation, and use an empty props object when the defaults (or a named **target**) already describe the exchange:
+
+```typescript
+import { AuthNamespace } from '@node-in-layers/auth'
+
+// Inside a feature implementation (signature simplified):
+const http = await context.services[AuthNamespace.Api].getOnBehalfOfHttpClient(
+  {},
+  crossLayerProps
+)
+const { data } = await http.get('https://downstream.example/api/v1/resource')
+```
+
+`getOnBehalfOfHttpClient` returns an Axios instance whose default `Authorization` header is `Bearer <exchanged access token>`. Use **`exchangeAccessToken`** instead if you only need the token or want to handle HTTP yourself.
+
+You can configure **multiple named targets** (see `authentication.oauth.tokenExchange.targets` in the config reference): each target can point at a different token endpoint and/or audience, resource, and scope for a specific downstream service. To exchange for a **different** service than the default, pass **`target`** with the key used in config:
+
+```typescript
+const http = await context.services[AuthNamespace.Api].getOnBehalfOfHttpClient(
+  { target: 'billingApi' },
+  crossLayerProps
+)
+```
+
+That run uses the `billingApi` entry’s `tokenEndpoint`, `audience` / `resource` / `scope`, and any `extraParams` merged with the global exchange settings—so one app can broker on-behalf-of access to several backends without duplicating feature code.
 
 ## QUICK: How To Use
 
@@ -40,7 +134,7 @@ import { authModelCrudsOverrides } from '@node-in-layers/auth/api/index.js'
 
 const config = {
   [CoreNamespace.root]: {
-    apps: [
+    domains: [
       await import('@node-in-layers/data/index.js'),
 
       // Add "Transport" Layer (rest-api or mcp-server)
@@ -79,6 +173,7 @@ const config = {
         LoginApproachServiceName.ApiKeyAuthLogin,
         LoginApproachServiceName.BasicAuthLogin,
         LoginApproachServiceName.OidcAuthLogin,
+        LoginApproachServiceName.SharedSecretAuthLogin,
       ],
       passwordHashSecretKey: process.env.PASSWORD_HASH_SECRET_KEY!,
       jwtSecret: process.env.AUTH_JWT_SECRET!,
@@ -91,14 +186,17 @@ const config = {
         cleanupBatchSize: 500,
         cleanupMaxQueries: 20,
       },
-      jwksUris: ['https://your-provider/.well-known/jwks.json'],
-
-      // Optional upstream Bearer (often with loginApproaches: [] on MCP).
-      oauthPassthrough: {
-        enabled: true,
-        validateMode: 'jwks',
-        autoProvision: true,
-        claimMapping: {},
+      oauth: {
+        oidc: {
+          jwksUris: ['https://your-provider/.well-known/jwks.json'],
+        },
+        // Optional upstream Bearer (often with loginApproaches: [] on MCP).
+        passthrough: {
+          enabled: true,
+          validateMode: 'jwks',
+          autoProvision: true,
+          claimMapping: {},
+        },
       },
 
       // loginPath: '/login',
@@ -118,6 +216,113 @@ const config = {
 - Issues a system JWT + refresh token after successful login, validates JWT on protected requests, and supports token refresh/rotation.
 - Works with both REST API and MCP transports.
 - Supports custom user models via `AuthNamespace.Core.userModel`.
+
+## Server-to-Server Shared Secret Login
+
+For server-to-server authentication, the shared secret is used only for the
+initial login handshake. The API verifies the secret, resolves or
+auto-provisions a service user, and returns the same system JWT and refresh
+token used by every other login approach. Subsequent requests use the normal
+`Authorization: Bearer <jwt>` header.
+
+Add `LoginApproachServiceName.SharedSecretAuthLogin` to
+`authentication.loginApproaches`, then configure either one shared secret or a
+service dictionary. These configuration shapes are mutually exclusive through
+the exported `XOR` type.
+
+### Single service
+
+```typescript
+import { AuthNamespace, LoginApproachServiceName } from '@node-in-layers/auth'
+
+const config = {
+  [AuthNamespace.Api]: {
+    authentication: {
+      loginApproaches: [LoginApproachServiceName.SharedSecretAuthLogin],
+      sharedSecret: {
+        secret: process.env.INTERNAL_API_SECRET!,
+        defaultServiceName: 'public-api',
+        autoProvision: true,
+      },
+      jwtSecret: process.env.AUTH_JWT_SECRET!,
+      jwtIssuer: 'my-system',
+      jwtAudience: 'my-system-clients',
+      jwtExpiresInSeconds: 3600,
+    },
+  },
+}
+```
+
+The caller posts to the normal login endpoint:
+
+```json
+{
+  "sharedSecretAuth": {
+    "secret": "the-configured-secret"
+  }
+}
+```
+
+### Multiple services
+
+Use a service dictionary when each calling server needs a distinct identity,
+secret, and optional user metadata:
+
+```typescript
+sharedSecret: {
+  services: {
+    publicApi: {
+      secret: process.env.PUBLIC_API_SECRET!,
+      user: {
+        firstName: 'Public',
+        lastName: 'API',
+      },
+    },
+    billingWorker: {
+      secret: [process.env.BILLING_SECRET_CURRENT!, process.env.BILLING_SECRET_OLD!],
+    },
+  },
+  autoProvision: true,
+}
+```
+
+The caller may include `serviceName` when using a service dictionary. If it is
+omitted, the API checks the configured services until it finds the matching
+secret:
+
+```json
+{
+  "sharedSecretAuth": {
+    "secret": "the-billing-secret",
+    "serviceName": "billingWorker"
+  }
+}
+```
+
+Secrets may be configured as a string or an array of active strings to support
+zero-downtime rotation. Secret comparison is performed in constant time.
+When `autoProvision` is enabled (the default), the API creates a persistent
+enabled `User` for the service when one does not already exist. The generated
+service username is `service:<serviceName>`. This gives service calls normal
+user IDs for policies, audit records, and foreign-key relationships.
+
+### Auth client
+
+The auth client can perform the handshake automatically. `baseUrl` is required
+because it identifies the API where `/login` and `/token/refresh` are hosted:
+
+```typescript
+[AuthNamespace.Client]: {
+  baseUrl: 'https://private-api.example.com',
+  sharedSecretAuth: {
+    secret: process.env.PRIVATE_API_SECRET!,
+    serviceName: 'publicApi',
+  },
+}
+```
+
+The first `getAuth()` call logs in with the shared secret. Later calls use the
+cached JWT and automatically refresh it using the normal refresh-token flow.
 
 # Core Feature Implementations
 
@@ -242,7 +447,6 @@ type OrganizationReferenceProperty = Readonly<{
     loginPropsSchema?: ZodType<JsonObj>
     skipAllAuthentication?: boolean
     basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
-    parseOidcPayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
     passwordHashSecretKey?: string
     noSaveLoginAttempts?: boolean
     jwtSecret?: string
@@ -256,16 +460,64 @@ type OrganizationReferenceProperty = Readonly<{
       cleanupBatchSize?: number
       cleanupMaxQueries?: number
     }
-    jwksUris?: readonly string[]
-    oauthPassthrough?: {
-      enabled: boolean
-      validateMode?: 'jwks' | 'opaque'
-      autoProvision?: boolean
-      claimMapping?: {
-        email?: string
-        firstName?: string
-        lastName?: string
-        username?: string
+    oauth?: {
+      tokenEndpoint?: string
+      scopes?: readonly string[]
+      clientId?: string
+      clientSecret?: string
+      clientAuth?: 'client_secret_basic' | 'client_secret_post'
+      oidc?: {
+        issuer?: string
+        jwksUris: readonly string[]
+        parsePayloadIdentifiers?: (payload: JsonObj) => { iss?: string; sub?: string }
+      }
+      passthrough?: {
+        enabled: boolean
+        validateMode?: 'jwks' | 'opaque'
+        autoProvision?: boolean
+        claimMapping?: {
+          email?: string
+          firstName?: string
+          lastName?: string
+          username?: string
+        }
+      }
+      /**
+       * RFC 8693 token exchange for getOnBehalfOfHttpClient / exchangeAccessToken.
+       * Requires endpoint + client credentials when enabled, resolved from tokenExchange first, then oauth root.
+       */
+      tokenExchange?: {
+        enabled: boolean
+        tokenEndpoint?: string
+        clientAuth?: 'client_secret_basic' | 'client_secret_post'
+        clientId?: string
+        clientSecret?: string
+        defaultAudience?: string
+        defaultResource?: string
+        defaultScope?: string
+        targets?: Record<
+          string,
+          {
+            tokenEndpoint?: string
+            audience?: string
+            resource?: string
+            scope?: string
+            extraParams?: Record<string, string>
+          }
+        >
+        extraParams?: Record<string, string>
+      }
+      /**
+       * Client credentials support for auth/client getAuth().
+       */
+      clientCredentials?: {
+        enabled: boolean
+        tokenEndpoint?: string
+        clientId?: string
+        clientSecret?: string
+        clientAuth?: 'client_secret_basic' | 'client_secret_post'
+        scopes?: readonly string[]
+        extraParams?: Record<string, string>
       }
     }
     loginPath?: string
@@ -341,7 +593,9 @@ type LoginRequest = {
 
 Without pass-through: `authenticate()` validates a **system** JWT and returns the user.
 
-With **OAuth pass-through** (`authentication.oauthPassthrough.enabled` on `[AuthNamespace.Api]`): the same Bearer is verified per `validateMode` (**jwks** → OIDC JWT + optional **autoProvision**; **opaque** → any non-empty Bearer, no user). API services expose **`getPassthroughHttpClient(crossLayerProps)`** so features can call outbound HTTP with the same Authorization header.
+With **OAuth pass-through** (`authentication.oauth.passthrough.enabled` on `[AuthNamespace.Api]`): the same Bearer is verified per `validateMode` (**jwks** → OIDC JWT + optional **autoProvision**; **opaque** → any non-empty Bearer, no user). API services expose **`getPassthroughHttpClient(crossLayerProps)`** so features can call outbound HTTP with the same Authorization header.
+
+With **token exchange** (`authentication.oauth.tokenExchange.enabled`), **`getOnBehalfOfHttpClient(props, crossLayerProps)`** uses that same incoming Bearer as the RFC 8693 subject token (unless `props.subjectToken` is set) and returns an Axios client authorized for a downstream API—see **OAuth token exchange (on-behalf-of)** above.
 
 - Success: user object (or `void` in opaque mode when no user is attached).
 - Failure: returns `AUTH_FAILED`.

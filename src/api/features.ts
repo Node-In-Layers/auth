@@ -19,28 +19,31 @@ import {
   type Policy,
 } from '../types.js'
 import {
+  AuthenticateProps,
+  AuthenticateSchema,
+  CleanupRefreshTokensSchema,
+  DefaultLoginRequestSchema,
+  LoginFeatureProps,
+  LoginResult,
+  LoginSchema,
   LoginAttemptResult,
   PolicyEngineContext,
+  RefreshSchema,
   type LoginAttempt,
   type User,
   AuthCoreServicesLayer,
   PolicyContext,
 } from '../core/types.js'
 import { policyEngine } from '../core/libs/policy-engine.js'
-import { unpackAuthentication } from './internal-libs.js'
+import {
+  getOAuthPassthroughConfig,
+  unpackAuthentication,
+} from './internal-libs.js'
 import {
   ApiFeaturesLayer,
   ApiServices,
   ApiServicesLayer,
-  DefaultLoginRequestSchema,
-  LoginFeatureProps,
-  LoginResult,
   ApiFeatures,
-  AuthenticateProps,
-  AuthenticateSchema,
-  CleanupRefreshTokensSchema,
-  LoginSchema,
-  RefreshSchema,
 } from './types.js'
 
 type _LoginApproachResult = Readonly<{
@@ -213,8 +216,8 @@ export const create = (
     crossLayerProps
   ) => {
     const log = context.log.getInnerLogger('authenticate', crossLayerProps)
-    const apiConfig = context.config[AuthNamespace.Api] as ApiConfig
-    const passthrough = apiConfig?.authentication?.oauthPassthrough
+    const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
+    const passthrough = getOAuthPassthroughConfig(apiConfig?.authentication)
 
     const tryLocalJwt = () =>
       apiServices.validateJwt(props.token, crossLayerProps)

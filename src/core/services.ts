@@ -14,7 +14,6 @@ import {
   User,
 } from './types.js'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const create = (context: ServicesContext): AuthCoreServices => {
   const _getOrganizationAdmin = async (
     user: User,

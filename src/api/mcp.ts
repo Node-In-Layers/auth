@@ -22,20 +22,17 @@ import {
   normalizeMethod,
   authorizationMiddleware,
 } from './internal-transport-libs.js'
+import { getOAuthPassthroughConfig } from './internal-libs.js'
 import { addUserToCrossLayerProps } from './libs.js'
 
 const MCP_NAMESPACE = '@node-in-layers/mcp-server'
 
-type _McpContext = FeaturesContext<
-  Config,
-  ApiServicesLayer,
-  ApiFeaturesLayer,
-  Readonly<{ mcp?: Readonly<Record<string, unknown>> }>
->
+type _McpContext = FeaturesContext<Config, ApiServicesLayer, ApiFeaturesLayer> &
+  Readonly<{ mcp: Readonly<Record<string, unknown>> }>
 
 export const create = (context: _McpContext): ApiMcp => {
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
-  const host = context[MCP_NAMESPACE] as ApiHost & {
+  const host = context.mcp[MCP_NAMESPACE] as ApiHost & {
     addTool: (tool: ServerTool) => void
   }
 
@@ -115,7 +112,9 @@ export const create = (context: _McpContext): ApiMcp => {
     host.addPreRouteMiddleware(middleware)
   }
 
-  const oauthPassthrough = apiConfig?.authentication?.oauthPassthrough?.enabled
+  const oauthPassthrough = getOAuthPassthroughConfig(
+    apiConfig?.authentication
+  )?.enabled
 
   if (!oauthPassthrough) {
     const loginHandler = createLoginHandler(

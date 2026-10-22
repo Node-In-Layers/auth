@@ -1,4 +1,4 @@
-import { Config } from '@node-in-layers/core'
+import { Config, XOR } from '@node-in-layers/core'
 import { z } from 'zod'
 import {
   DataDescription,
@@ -7,6 +7,7 @@ import {
   PropertyInstance,
   JsonObj,
 } from 'functional-models'
+import type { User } from './core/types.js'
 
 /** Policy rule action: allow or deny access. */
 export enum PolicyAction {
@@ -60,6 +61,8 @@ export type PropertyFactory<
 export enum AuthNamespace {
   Core = '@node-in-layers/auth/core',
   Api = '@node-in-layers/auth/api',
+  McpClient = '@node-in-layers/auth/mcp-client',
+  Client = '@node-in-layers/auth/client',
 }
 
 /** Registered login approach service names for the API layer. */
@@ -67,6 +70,7 @@ export enum LoginApproachServiceName {
   ApiKeyAuthLogin = `${AuthNamespace.Api}.apiKeyAuthLogin`,
   OidcAuthLogin = `${AuthNamespace.Api}.oidcAuthLogin`,
   BasicAuthLogin = `${AuthNamespace.Api}.basicAuthLogin`,
+  SharedSecretAuthLogin = `${AuthNamespace.Api}.sharedSecretAuthLogin`,
 }
 
 /**
@@ -80,6 +84,24 @@ export enum OAuthPassthroughValidateMode {
 }
 
 /**
+ * OAuth 2.0 token endpoint client authentication method.
+ * @interface
+ */
+export enum TokenExchangeClientAuth {
+  ClientSecretBasic = 'client_secret_basic',
+  ClientSecretPost = 'client_secret_post',
+}
+
+/**
+ * Shared OAuth client authentication settings.
+ */
+export type OAuthClientConfig = Readonly<{
+  clientId: string
+  clientSecret: string
+  clientAuth?: TokenExchangeClientAuth
+}>
+
+/**
  * OIDC claims used to look up or match a local user (e.g. from an ID token).
  * @interface
  */
@@ -87,6 +109,151 @@ export type OidcUserLookupIdentifiers = Readonly<{
   sub?: string
   iss?: string
 }>
+
+/**
+ * OIDC settings used by oauth login/passthrough jwt validation.
+ * `jwksUris` is required whenever this section is provided.
+ */
+export type OAuthOidcConfig = Readonly<{
+  issuer?: string
+  jwksUris: readonly string[]
+  parsePayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
+}>
+
+/**
+ * OAuth pass-through configuration.
+ */
+export type OAuthPassthroughDisabledConfig = Readonly<{
+  enabled: false
+}>
+
+export type OAuthPassthroughEnabledConfig = Readonly<{
+  enabled: true
+  validateMode?: OAuthPassthroughValidateMode
+  autoProvision?: boolean
+  claimMapping?: Readonly<{
+    email?: string
+    firstName?: string
+    lastName?: string
+    username?: string
+  }>
+}>
+
+export type OAuthPassthroughConfig = XOR<
+  OAuthPassthroughDisabledConfig,
+  OAuthPassthroughEnabledConfig
+>
+
+/**
+ * OAuth token exchange per-target override configuration.
+ */
+export type OAuthTokenExchangeTargetConfig = Readonly<{
+  tokenEndpoint?: string
+  audience?: string
+  resource?: string
+  scope?: string
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+/**
+ * OAuth token exchange configuration.
+ * When enabled, client credentials are required.
+ */
+export type OAuthTokenExchangeDisabledConfig = Readonly<{
+  enabled: false
+  targets?: Readonly<Record<string, OAuthTokenExchangeTargetConfig>>
+  extraParams?: Readonly<Record<string, string>>
+  defaultAudience?: string
+  defaultResource?: string
+  defaultScope?: string
+  tokenEndpoint?: string
+  clientAuth?: TokenExchangeClientAuth
+}>
+
+export type OAuthTokenExchangeEnabledConfig = Readonly<{
+  enabled: true
+  tokenEndpoint?: string
+  clientId?: string
+  clientSecret?: string
+  clientAuth?: TokenExchangeClientAuth
+  defaultAudience?: string
+  defaultResource?: string
+  defaultScope?: string
+  targets?: Readonly<Record<string, OAuthTokenExchangeTargetConfig>>
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+export type OAuthTokenExchangeConfig = XOR<
+  OAuthTokenExchangeDisabledConfig,
+  OAuthTokenExchangeEnabledConfig
+>
+
+/**
+ * OAuth2 client credentials configuration for auth client token acquisition.
+ */
+export type OAuthClientCredentialsDisabledConfig = Readonly<{
+  enabled: false
+}>
+
+export type OAuthClientCredentialsEnabledConfig = Readonly<{
+  enabled: true
+  tokenEndpoint?: string
+  clientId?: string
+  clientSecret?: string
+  clientAuth?: TokenExchangeClientAuth
+  scopes?: readonly string[]
+  extraParams?: Readonly<Record<string, string>>
+}>
+
+export type OAuthClientCredentialsConfig = XOR<
+  OAuthClientCredentialsDisabledConfig,
+  OAuthClientCredentialsEnabledConfig
+>
+
+/**
+ * OAuth/OIDC configuration grouping all oauth-related auth settings.
+ */
+export type ApiAuthenticationOAuthConfig = Readonly<{
+  tokenEndpoint?: string
+  scopes?: readonly string[]
+  clientId?: string
+  clientSecret?: string
+  clientAuth?: TokenExchangeClientAuth
+  oidc?: OAuthOidcConfig
+  passthrough?: OAuthPassthroughConfig
+  tokenExchange?: OAuthTokenExchangeConfig
+  clientCredentials?: OAuthClientCredentialsConfig
+}>
+
+export type ServiceSecretDefinition = Readonly<{
+  /** Secret or list of active secrets (for zero-downtime rotation) */
+  secret: string | readonly string[]
+  /** Optional custom user details when auto-provisioning */
+  user?: Partial<User>
+  /** Optional roles or organization assignment */
+  roles?: readonly string[]
+}>
+
+type _SingleSharedSecret = Readonly<{
+  /** Single pre-shared secret (or list for zero-downtime rotation) */
+  secret: string | readonly string[]
+  /** Default service name/identifier (default: 'service:caller') */
+  defaultServiceName?: string
+}>
+
+type _MultiSharedSecret = Readonly<{
+  /** Multi-service dictionary keyed by service name */
+  services: Record<string, ServiceSecretDefinition | string | readonly string[]>
+}>
+
+export type SharedSecretAuthMode = XOR<_SingleSharedSecret, _MultiSharedSecret>
+
+export type SharedSecretAuthConfig = Readonly<{
+  enabled?: boolean
+  /** Auto-provision a database User record if it doesn't exist yet (default: true) */
+  autoProvision?: boolean
+}> &
+  SharedSecretAuthMode
 
 /**
  * All API-layer authentication settings: login, JWT, refresh tokens, transport paths, OAuth pass-through.
@@ -100,7 +267,7 @@ export type ApiAuthenticationConfig = Readonly<{
   skipAllAuthentication?: boolean
   /**
    * The domain.featureName for each login approach, in order.
-   * Use [] only when oauthPassthrough.enabled is true (no password/API-key/OIDC login chain).
+   * Use [] only when oauth.passthrough.enabled is true (no password/API-key/OIDC login chain).
    */
   loginApproaches: ReadonlyArray<LoginApproachServiceName | string>
   /**
@@ -111,8 +278,22 @@ export type ApiAuthenticationConfig = Readonly<{
   loginMethod?: string
   refreshPath?: string
   refreshMethod?: string
+  /**
+   * Optional client-side base url for @node-in-layers/auth/client HTTP calls.
+   * Example: https://api.example.com/auth
+   */
+  clientBaseUrl?: string
+  /**
+   * Optional default headers for @node-in-layers/auth/client HTTP calls.
+   */
+  clientHeaders?: Readonly<Record<string, string>>
+  /**
+   * Optional refresh buffer in ms used by @node-in-layers/auth/client.
+   * If token expiry is within this window, client will refresh automatically.
+   */
+  clientRefreshBufferMs?: number
   basicAuthIdentifiers?: ReadonlyArray<'email' | 'username'>
-  parseOidcPayloadIdentifiers?: (payload: JsonObj) => OidcUserLookupIdentifiers
+  oauth?: ApiAuthenticationOAuthConfig
   /** Required when core allowPasswordAuthentication is true. */
   passwordHashSecretKey?: string
   noSaveLoginAttempts?: boolean
@@ -127,21 +308,7 @@ export type ApiAuthenticationConfig = Readonly<{
     cleanupMaxQueries?: number
   }>
   jwtAlgorithms?: readonly string[]
-  jwksUris?: readonly string[]
-  /**
-   * Upstream Bearer pass-through (JWKS verification, optional auto-provision, opaque mode).
-   */
-  oauthPassthrough?: Readonly<{
-    enabled: boolean
-    validateMode?: OAuthPassthroughValidateMode
-    autoProvision?: boolean
-    claimMapping?: Readonly<{
-      email?: string
-      firstName?: string
-      lastName?: string
-      username?: string
-    }>
-  }>
+  sharedSecret?: SharedSecretAuthConfig
 }>
 
 /**
@@ -153,6 +320,16 @@ export type ApiConfig = Readonly<{
     skipAllAuthorization?: boolean
   }
   authentication: ApiAuthenticationConfig
+}>
+
+export type AuthClientConfig = Readonly<{
+  baseUrl: string
+  headers?: Readonly<Record<string, string>>
+  refreshBufferMs?: number
+  sharedSecretAuth?: Readonly<{
+    secret: string
+    serviceName?: string
+  }>
 }>
 
 /**
@@ -174,6 +351,7 @@ export type AuthConfigurations = Readonly<{
      */
     allowPasswordAuthentication?: boolean
   }
+  [AuthNamespace.Client]?: AuthClientConfig
   [AuthNamespace.Api]?: ApiConfig
 }>
 
