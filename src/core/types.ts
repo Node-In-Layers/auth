@@ -33,6 +33,13 @@ export const OidcAuthRequestSchema = z.object({
   }),
 })
 
+export const SharedSecretAuthRequestSchema = z.object({
+  sharedSecretAuth: z.object({
+    secret: z.string(),
+    serviceName: z.string().optional(),
+  }),
+})
+
 /**
  * Default request schema for auth login payload.
  * Exactly one built-in login payload should be provided.
@@ -42,15 +49,20 @@ export const DefaultLoginRequestSchema = z
     basicAuth: BasicAuthRequestSchema.shape.basicAuth.optional(),
     apiKeyAuth: ApiKeyAuthRequestSchema.shape.apiKeyAuth.optional(),
     oidcAuth: OidcAuthRequestSchema.shape.oidcAuth.optional(),
+    sharedSecretAuth:
+      SharedSecretAuthRequestSchema.shape.sharedSecretAuth.optional(),
   })
   .refine(
     value =>
-      [value.basicAuth, value.apiKeyAuth, value.oidcAuth].filter(
-        v => v !== undefined
-      ).length === 1,
+      [
+        value.basicAuth,
+        value.apiKeyAuth,
+        value.oidcAuth,
+        value.sharedSecretAuth,
+      ].filter(v => v !== undefined).length === 1,
     {
       message:
-        'Exactly one login payload is required: basicAuth, apiKeyAuth, or oidcAuth.',
+        'Exactly one login payload is required: basicAuth, apiKeyAuth, oidcAuth, or sharedSecretAuth.',
     }
   ) as z.ZodType<JsonObj>
 

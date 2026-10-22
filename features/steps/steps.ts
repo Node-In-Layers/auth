@@ -569,10 +569,10 @@ const _createMockMcp = () => {
             return
           }
           if (result && typeof result === 'object') {
-            if (!req.extendedCrossLayerProps) {
-              req.extendedCrossLayerProps = {}
+            if (!req._crossLayerProps) {
+              req._crossLayerProps = {}
             }
-            Object.assign(req.extendedCrossLayerProps, result)
+            Object.assign(req._crossLayerProps, result)
           }
           next()
         } catch (e) {

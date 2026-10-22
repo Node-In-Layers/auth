@@ -173,6 +173,7 @@ const config = {
         LoginApproachServiceName.ApiKeyAuthLogin,
         LoginApproachServiceName.BasicAuthLogin,
         LoginApproachServiceName.OidcAuthLogin,
+        LoginApproachServiceName.SharedSecretAuthLogin,
       ],
       passwordHashSecretKey: process.env.PASSWORD_HASH_SECRET_KEY!,
       jwtSecret: process.env.AUTH_JWT_SECRET!,
@@ -215,6 +216,113 @@ const config = {
 - Issues a system JWT + refresh token after successful login, validates JWT on protected requests, and supports token refresh/rotation.
 - Works with both REST API and MCP transports.
 - Supports custom user models via `AuthNamespace.Core.userModel`.
+
+## Server-to-Server Shared Secret Login
+
+For server-to-server authentication, the shared secret is used only for the
+initial login handshake. The API verifies the secret, resolves or
+auto-provisions a service user, and returns the same system JWT and refresh
+token used by every other login approach. Subsequent requests use the normal
+`Authorization: Bearer <jwt>` header.
+
+Add `LoginApproachServiceName.SharedSecretAuthLogin` to
+`authentication.loginApproaches`, then configure either one shared secret or a
+service dictionary. These configuration shapes are mutually exclusive through
+the exported `XOR` type.
+
+### Single service
+
+```typescript
+import { AuthNamespace, LoginApproachServiceName } from '@node-in-layers/auth'
+
+const config = {
+  [AuthNamespace.Api]: {
+    authentication: {
+      loginApproaches: [LoginApproachServiceName.SharedSecretAuthLogin],
+      sharedSecret: {
+        secret: process.env.INTERNAL_API_SECRET!,
+        defaultServiceName: 'public-api',
+        autoProvision: true,
+      },
+      jwtSecret: process.env.AUTH_JWT_SECRET!,
+      jwtIssuer: 'my-system',
+      jwtAudience: 'my-system-clients',
+      jwtExpiresInSeconds: 3600,
+    },
+  },
+}
+```
+
+The caller posts to the normal login endpoint:
+
+```json
+{
+  "sharedSecretAuth": {
+    "secret": "the-configured-secret"
+  }
+}
+```
+
+### Multiple services
+
+Use a service dictionary when each calling server needs a distinct identity,
+secret, and optional user metadata:
+
+```typescript
+sharedSecret: {
+  services: {
+    publicApi: {
+      secret: process.env.PUBLIC_API_SECRET!,
+      user: {
+        firstName: 'Public',
+        lastName: 'API',
+      },
+    },
+    billingWorker: {
+      secret: [process.env.BILLING_SECRET_CURRENT!, process.env.BILLING_SECRET_OLD!],
+    },
+  },
+  autoProvision: true,
+}
+```
+
+The caller may include `serviceName` when using a service dictionary. If it is
+omitted, the API checks the configured services until it finds the matching
+secret:
+
+```json
+{
+  "sharedSecretAuth": {
+    "secret": "the-billing-secret",
+    "serviceName": "billingWorker"
+  }
+}
+```
+
+Secrets may be configured as a string or an array of active strings to support
+zero-downtime rotation. Secret comparison is performed in constant time.
+When `autoProvision` is enabled (the default), the API creates a persistent
+enabled `User` for the service when one does not already exist. The generated
+service username is `service:<serviceName>`. This gives service calls normal
+user IDs for policies, audit records, and foreign-key relationships.
+
+### Auth client
+
+The auth client can perform the handshake automatically. `baseUrl` is required
+because it identifies the API where `/login` and `/token/refresh` are hosted:
+
+```typescript
+[AuthNamespace.Client]: {
+  baseUrl: 'https://private-api.example.com',
+  sharedSecretAuth: {
+    secret: process.env.PRIVATE_API_SECRET!,
+    serviceName: 'publicApi',
+  },
+}
+```
+
+The first `getAuth()` call logs in with the shared secret. Later calls use the
+cached JWT and automatically refresh it using the normal refresh-token flow.
 
 # Core Feature Implementations
 

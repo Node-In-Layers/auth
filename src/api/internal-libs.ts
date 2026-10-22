@@ -1,12 +1,14 @@
 import { pbkdf2, randomBytes, timingSafeEqual } from 'node:crypto'
 import get from 'lodash/get.js'
-import { FeaturesContext, isErrorObject } from '@node-in-layers/core'
+import { FeaturesContext, isErrorObject, XOR } from '@node-in-layers/core'
 import { JWTPayload } from 'jose'
 import { JsonAble, JsonObj } from 'functional-models'
 import {
   AuthConfig,
   AuthNamespace,
   type ApiAuthenticationConfig,
+  type ServiceSecretDefinition,
+  type SharedSecretAuthConfig,
   type ApiConfig,
   TokenExchangeClientAuth,
 } from '../types.js'
@@ -26,6 +28,96 @@ type _UnpackedAuth = Readonly<{
   apiConfig: ApiConfig
   loginApproaches: readonly _ResolvedLoginApproach[]
 }>
+
+type SharedSecretResolution = Readonly<{
+  serviceName: string
+  definition: ServiceSecretDefinition
+}>
+
+const _isServiceSecretDefinition = (
+  value: ServiceSecretDefinition | string | readonly string[]
+): value is ServiceSecretDefinition =>
+  typeof value === 'object' &&
+  value !== null &&
+  Array.isArray(value) === false &&
+  'secret' in value
+
+const _ensureArray = <T>(value: XOR<T, readonly T[]>): readonly T[] => {
+  const normalized = value as T | readonly T[]
+  return Array.isArray(normalized) ? normalized : [normalized as T]
+}
+
+const _secretValues = (
+  definition: ServiceSecretDefinition | string | readonly string[]
+): readonly string[] => {
+  if (typeof definition === 'string') {
+    return [definition]
+  }
+  if (Array.isArray(definition)) {
+    return definition
+  }
+  if (_isServiceSecretDefinition(definition)) {
+    return _ensureArray(definition.secret)
+  }
+  return []
+}
+
+export const timingSafeStringEqual = (a: string, b: string): boolean => {
+  const bufferA = Buffer.from(a)
+  const bufferB = Buffer.from(b)
+  return bufferA.length === bufferB.length && timingSafeEqual(bufferA, bufferB)
+}
+
+export const resolveSharedSecretService = (
+  candidateSecret: string,
+  serviceNameHint: string | undefined,
+  config: SharedSecretAuthConfig | undefined
+): SharedSecretResolution | undefined => {
+  if (!config || config.enabled === false) {
+    return undefined
+  }
+
+  if (config.secret) {
+    const serviceName = config.defaultServiceName || 'caller'
+    const definition: ServiceSecretDefinition = {
+      secret: config.secret,
+    }
+    return _secretValues(definition).some(secret =>
+      timingSafeStringEqual(candidateSecret, secret)
+    )
+      ? { serviceName, definition }
+      : undefined
+  }
+
+  if (!config.services) {
+    return undefined
+  }
+  const serviceNames = serviceNameHint
+    ? [serviceNameHint]
+    : Object.keys(config.services)
+  return serviceNames.reduce<SharedSecretResolution | undefined>(
+    (resolved, serviceName) => {
+      if (resolved) {
+        return resolved
+      }
+      const configured = config.services[serviceName]
+      if (!configured) {
+        return undefined
+      }
+      const definition: ServiceSecretDefinition = _isServiceSecretDefinition(
+        configured
+      )
+        ? configured
+        : { secret: configured }
+      return _secretValues(definition).some(secret =>
+        timingSafeStringEqual(candidateSecret, secret)
+      )
+        ? { serviceName, definition }
+        : undefined
+    },
+    undefined
+  )
+}
 
 const parseId = (
   id: string

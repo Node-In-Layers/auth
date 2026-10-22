@@ -71,6 +71,7 @@ export type ApiServices = Readonly<{
   apiKeyAuthLogin: LoginApproach
   oidcAuthLogin: LoginApproach
   basicAuthLogin: LoginApproach
+  sharedSecretAuthLogin: LoginApproach
   /**
    * Critical function for getting the user object. If the system replaces the user model, then we/system creators
    * need the ability to get the correct user object.
@@ -114,7 +115,8 @@ export type ApiRouteMethod = string
 /** Express-style request handler for an API route. */
 export type ApiRouteHandler = (
   req: Request,
-  res: ExpressResponse
+  res: ExpressResponse,
+  crossLayerProps?: CrossLayerProps
 ) => Promise<void> | void
 
 /** Express-style middleware for API routes. */

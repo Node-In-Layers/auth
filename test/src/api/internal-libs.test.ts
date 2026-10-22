@@ -28,10 +28,101 @@ import {
   buildTokenExchangeRequestHeaders,
   encodeTokenExchangeFormAsUrlSearchParams,
   parseTokenExchangeResponseData,
+  timingSafeStringEqual,
+  resolveSharedSecretService,
   type _JwtPayload,
 } from '../../../src/api/internal-libs.js'
 
 describe('/src/api/internal-libs.ts', () => {
+  describe('#timingSafeStringEqual()', () => {
+    it('should return true for equal strings', () => {
+      const input = { left: 'shared-secret', right: 'shared-secret' }
+      const actual = timingSafeStringEqual(input.left, input.right)
+      const expected = true
+      assert.equal(actual, expected)
+    })
+
+    it('should return false for different strings and lengths', () => {
+      const input = { left: 'shared-secret', right: 'wrong' }
+      const actual = timingSafeStringEqual(input.left, input.right)
+      const expected = false
+      assert.equal(actual, expected)
+    })
+  })
+
+  describe('#resolveSharedSecretService()', () => {
+    it('should resolve a single shared secret to its default service', () => {
+      const input = {
+        candidateSecret: 'single-secret',
+        serviceNameHint: undefined,
+        config: {
+          secret: 'single-secret',
+        },
+      } as const
+      const actual = resolveSharedSecretService(
+        input.candidateSecret,
+        input.serviceNameHint,
+        input.config
+      )
+      const expected = 'caller'
+      assert.equal(actual?.serviceName, expected)
+    })
+
+    it('should resolve a rotated secret', () => {
+      const input = {
+        candidateSecret: 'old-secret',
+        serviceNameHint: undefined,
+        config: {
+          secret: ['new-secret', 'old-secret'],
+        },
+      } as const
+      const actual = resolveSharedSecretService(
+        input.candidateSecret,
+        input.serviceNameHint,
+        input.config
+      )
+      assert.isDefined(actual)
+    })
+
+    it('should resolve the matching service in a service dictionary', () => {
+      const input = {
+        candidateSecret: 'billing-secret',
+        serviceNameHint: undefined,
+        config: {
+          services: {
+            publicApi: 'public-secret',
+            billing: { secret: 'billing-secret' },
+          },
+        },
+      } as const
+      const actual = resolveSharedSecretService(
+        input.candidateSecret,
+        input.serviceNameHint,
+        input.config
+      )
+      const expected = 'billing'
+      assert.equal(actual?.serviceName, expected)
+    })
+
+    it('should return undefined for an invalid secret', () => {
+      const input = {
+        candidateSecret: 'invalid',
+        serviceNameHint: undefined,
+        config: {
+          services: {
+            billing: 'billing-secret',
+          },
+        },
+      } as const
+      const actual = resolveSharedSecretService(
+        input.candidateSecret,
+        input.serviceNameHint,
+        input.config
+      )
+      assert.isUndefined(actual)
+    })
+  })
+
   describe('#unpackAuthentication()', () => {
     it('should throw when api config is missing or has no loginApproaches', () => {
       const context = {

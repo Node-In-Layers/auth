@@ -50,6 +50,7 @@ import {
   resolveTokenExchangeTarget,
   resolveTokenExchangeTokenEndpoint,
   verifyPasswordHash,
+  resolveSharedSecretService,
   type _JwtPayload,
   getHeaders,
 } from './internal-libs.js'
@@ -72,6 +73,10 @@ type _LoginRequest = Readonly<{
     username?: string
     email?: string
     password?: string
+  }>
+  sharedSecretAuth?: Readonly<{
+    secret?: string
+    serviceName?: string
   }>
 }>
 
@@ -284,6 +289,33 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       )
     const result = await Users.search(query.take(1).compile())
     return _toUser(result.instances[0])
+  }
+
+  const _resolveOrCreateServiceUser = async (
+    serviceName: string,
+    definition: Readonly<{ user?: Partial<User> }>
+  ): Promise<User | undefined> => {
+    const Users = getUserCruds<User>()
+    const username = definition.user?.username || `service:${serviceName}`
+    const existing = await Users.search(
+      queryBuilder().property('username', username).take(1).compile()
+    )
+    const existingUser = await _toUser(existing.instances[0])
+    if (existingUser) {
+      return existingUser
+    }
+    if (authConfig.sharedSecret?.autoProvision === false) {
+      return undefined
+    }
+    const user = await Users.create<'id'>({
+      ...definition.user,
+      email: definition.user?.email || `${serviceName}@service.local`,
+      username,
+      firstName: definition.user?.firstName || 'Service',
+      lastName: definition.user?.lastName || serviceName,
+      enabled: definition.user?.enabled ?? true,
+    }).then(instance => instance.save())
+    return user.toObj<User>()
   }
 
   const _parseOidcIdentifiers = (
@@ -636,6 +668,26 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       })
   }
 
+  const sharedSecretAuthLogin: LoginApproach = async ({ request }) => {
+    const sharedSecretAuth = (request as _LoginRequest).sharedSecretAuth
+    const secret = sharedSecretAuth?.secret
+    if (!secret) {
+      return undefined
+    }
+    const resolved = resolveSharedSecretService(
+      secret,
+      sharedSecretAuth?.serviceName,
+      authConfig.sharedSecret
+    )
+    if (!resolved) {
+      return undefined
+    }
+    return _resolveOrCreateServiceUser(
+      resolved.serviceName,
+      resolved.definition
+    )
+  }
+
   const getPassthroughHttpClient: ApiServices['getPassthroughHttpClient'] = (
     crossLayerProps: CrossLayerProps
   ) => {
@@ -737,6 +789,7 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
     apiKeyAuthLogin,
     oidcAuthLogin,
     basicAuthLogin,
+    sharedSecretAuthLogin,
     getUserCruds,
   }
 }

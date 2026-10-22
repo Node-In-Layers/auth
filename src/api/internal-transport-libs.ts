@@ -247,17 +247,20 @@ export const createLoginHandler =
   (
     login: NilAnnotatedFunction<LoginFeatureProps, LoginResult>
   ): ApiRouteHandler =>
-  async (req, res) => {
+  async (req, res, crossLayerProps) => {
     const request =
       req.body && typeof req.body === 'object' ? (req.body as JsonObj) : {}
     const userAgentRaw = req.headers['user-agent']
     const userAgent =
       typeof userAgentRaw === 'string' ? userAgentRaw : userAgentRaw?.[0]
-    const result = await login({
-      request,
-      ip: req.ip,
-      userAgent,
-    })
+    const result = await login(
+      {
+        request,
+        ip: req.ip,
+        userAgent,
+      },
+      crossLayerProps
+    )
     if (isErrorObject(result)) {
       res.status(NOT_AUTHORIZED).json(result)
       return
@@ -269,17 +272,20 @@ export const createRefreshHandler =
   (
     refresh: NilAnnotatedFunction<RefreshFeatureProps, RefreshResult>
   ): ApiRouteHandler =>
-  async (req, res) => {
+  async (req, res, crossLayerProps) => {
     const request =
       req.body && typeof req.body === 'object' ? (req.body as JsonObj) : {}
     const userAgentRaw = req.headers['user-agent']
     const userAgent =
       typeof userAgentRaw === 'string' ? userAgentRaw : userAgentRaw?.[0]
-    const result = await refresh({
-      request,
-      ip: req.ip,
-      userAgent,
-    })
+    const result = await refresh(
+      {
+        request,
+        ip: req.ip,
+        userAgent,
+      },
+      crossLayerProps
+    )
     if (isErrorObject(result)) {
       res.status(NOT_AUTHORIZED).json(result)
       return

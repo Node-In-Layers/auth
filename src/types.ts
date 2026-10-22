@@ -7,6 +7,7 @@ import {
   PropertyInstance,
   JsonObj,
 } from 'functional-models'
+import type { User } from './core/types.js'
 
 /** Policy rule action: allow or deny access. */
 export enum PolicyAction {
@@ -69,6 +70,7 @@ export enum LoginApproachServiceName {
   ApiKeyAuthLogin = `${AuthNamespace.Api}.apiKeyAuthLogin`,
   OidcAuthLogin = `${AuthNamespace.Api}.oidcAuthLogin`,
   BasicAuthLogin = `${AuthNamespace.Api}.basicAuthLogin`,
+  SharedSecretAuthLogin = `${AuthNamespace.Api}.sharedSecretAuthLogin`,
 }
 
 /**
@@ -223,6 +225,36 @@ export type ApiAuthenticationOAuthConfig = Readonly<{
   clientCredentials?: OAuthClientCredentialsConfig
 }>
 
+export type ServiceSecretDefinition = Readonly<{
+  /** Secret or list of active secrets (for zero-downtime rotation) */
+  secret: string | readonly string[]
+  /** Optional custom user details when auto-provisioning */
+  user?: Partial<User>
+  /** Optional roles or organization assignment */
+  roles?: readonly string[]
+}>
+
+type _SingleSharedSecret = Readonly<{
+  /** Single pre-shared secret (or list for zero-downtime rotation) */
+  secret: string | readonly string[]
+  /** Default service name/identifier (default: 'service:caller') */
+  defaultServiceName?: string
+}>
+
+type _MultiSharedSecret = Readonly<{
+  /** Multi-service dictionary keyed by service name */
+  services: Record<string, ServiceSecretDefinition | string | readonly string[]>
+}>
+
+export type SharedSecretAuthMode = XOR<_SingleSharedSecret, _MultiSharedSecret>
+
+export type SharedSecretAuthConfig = Readonly<{
+  enabled?: boolean
+  /** Auto-provision a database User record if it doesn't exist yet (default: true) */
+  autoProvision?: boolean
+}> &
+  SharedSecretAuthMode
+
 /**
  * All API-layer authentication settings: login, JWT, refresh tokens, transport paths, OAuth pass-through.
  * @interface
@@ -276,6 +308,7 @@ export type ApiAuthenticationConfig = Readonly<{
     cleanupMaxQueries?: number
   }>
   jwtAlgorithms?: readonly string[]
+  sharedSecret?: SharedSecretAuthConfig
 }>
 
 /**
@@ -293,6 +326,10 @@ export type AuthClientConfig = Readonly<{
   baseUrl: string
   headers?: Readonly<Record<string, string>>
   refreshBufferMs?: number
+  sharedSecretAuth?: Readonly<{
+    secret: string
+    serviceName?: string
+  }>
 }>
 
 /**

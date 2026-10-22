@@ -383,6 +383,16 @@ export const create = (
         formatter: currentState?.formatter || defaultAuthFormatter,
       }
     }
+    if (clientConfig.sharedSecretAuth) {
+      const result = await login({
+        sharedSecretAuth: clientConfig.sharedSecretAuth,
+      })
+      return {
+        key: result.token,
+        header: defaultAuthHeader,
+        formatter: defaultAuthFormatter,
+      }
+    }
     const oauthToken = await _getOAuthAccessToken()
     return oauthToken
       ? {
