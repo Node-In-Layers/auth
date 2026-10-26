@@ -314,7 +314,8 @@ export const create = (context: ServicesContext<AuthConfig>): ApiServices => {
       firstName: definition.user?.firstName || 'Service',
       lastName: definition.user?.lastName || serviceName,
       enabled: definition.user?.enabled ?? true,
-    }).then(instance => instance.save())
+      npeOrganization: definition.user?.npeOrganization ?? true,
+    })
     return user.toObj<User>()
   }
 

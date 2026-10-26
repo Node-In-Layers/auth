@@ -322,14 +322,31 @@ export type ApiConfig = Readonly<{
   authentication: ApiAuthenticationConfig
 }>
 
-export type AuthClientConfig = Readonly<{
-  baseUrl: string
-  headers?: Readonly<Record<string, string>>
-  refreshBufferMs?: number
+export type AuthClientCredentials = Readonly<{
+  basicAuth?: Readonly<{
+    identifier: string
+    password: string
+  }>
+  apiKeyAuth?: Readonly<{
+    key: string
+  }>
+  oidcAuth?: Readonly<{
+    token: string
+  }>
   sharedSecretAuth?: Readonly<{
     secret: string
     serviceName?: string
   }>
+  oauth?: ApiAuthenticationOAuthConfig
+}>
+
+export type AuthClientConfig = Readonly<{
+  baseUrl: string
+  headers?: Readonly<Record<string, string>>
+  loginPath?: string
+  refreshPath?: string
+  refreshBufferMs?: number
+  credentials?: AuthClientCredentials
 }>
 
 /**

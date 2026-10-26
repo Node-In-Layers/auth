@@ -29,6 +29,10 @@ export const create = (
     context.services[AuthNamespace.Client].logout(crossLayerProps)
   )
 
+  const getAuth = async crossLayerProps => {
+    return context.services[AuthNamespace.Client].getAuth(crossLayerProps)
+  }
+
   const getState = async crossLayerProps => {
     return context.services[AuthNamespace.Client].getState(crossLayerProps)
   }
@@ -44,6 +48,7 @@ export const create = (
     login,
     refresh,
     logout,
+    getAuth,
     getState,
     setState,
   }

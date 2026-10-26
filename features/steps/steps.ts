@@ -1,5 +1,6 @@
 import sinon from 'sinon'
 import { execFile } from 'node:child_process'
+import http from 'node:http'
 import { promisify } from 'node:util'
 import merge from 'lodash/merge.js'
 import { decodeJwt } from 'jose'
@@ -31,7 +32,9 @@ import {
   LoginApproachServiceName,
 } from '../../src'
 import * as api from '../../src/api/index.js'
+import * as authClientDomain from '../../src/client/index.js'
 import {
+  AuthClientCredentials,
   OAuthPassthroughValidateMode,
   TokenExchangeClientAuth,
 } from '../../src/types.js'
@@ -257,6 +260,10 @@ type _World = {
   testMcpServerPort?: number
   mcpClient?: any
   mcpClientAuthState?: any
+  authClientServer?: http.Server
+  authClientSystem?: any
+  authClientFeatures?: any
+  authClientLastToken?: string
   expectedAuthorization?: string
   /** Subject token (e.g. Dex password-grant access token) for RFC 8693 scenarios */
   subjectToken?: string
@@ -1016,6 +1023,52 @@ const _CONTEXT: Record<string, _ContextFactory> = {
       [AuthNamespace.Api]: {
         authentication: {
           loginApproaches: [LoginApproachServiceName.BasicAuthLogin],
+        },
+      },
+    }),
+  'basic-and-shared-secret': () =>
+    _createSystem({
+      [AuthNamespace.Core]: {
+        allowPasswordAuthentication: true,
+      },
+      [AuthNamespace.Api]: {
+        authentication: {
+          loginApproaches: [
+            LoginApproachServiceName.BasicAuthLogin,
+            LoginApproachServiceName.SharedSecretAuthLogin,
+          ],
+          sharedSecret: {
+            secret: 'feature-shared-secret-1',
+            defaultServiceName: 'worker',
+            autoProvision: true,
+          },
+        },
+      },
+    }),
+  'shared-secret-default': () =>
+    _createSystem({
+      [AuthNamespace.Api]: {
+        authentication: {
+          loginApproaches: [LoginApproachServiceName.SharedSecretAuthLogin],
+          sharedSecret: {
+            secret: 'feature-shared-secret-1',
+            defaultServiceName: 'worker',
+            autoProvision: true,
+          },
+        },
+      },
+    }),
+  'api-key-and-basic': () =>
+    _createSystem({
+      [AuthNamespace.Core]: {
+        allowPasswordAuthentication: true,
+      },
+      [AuthNamespace.Api]: {
+        authentication: {
+          loginApproaches: [
+            LoginApproachServiceName.ApiKeyAuthLogin,
+            LoginApproachServiceName.BasicAuthLogin,
+          ],
         },
       },
     }),
@@ -2243,6 +2296,15 @@ BeforeAll(async function () {
 })
 
 After(async function (this: _World) {
+  if (this.authClientServer) {
+    await new Promise<void>(resolve =>
+      this.authClientServer!.close(() => resolve())
+    )
+    this.authClientServer = undefined
+  }
+  this.authClientSystem = undefined
+  this.authClientFeatures = undefined
+  this.authClientLastToken = undefined
   if (this.testMcpServerContainer) {
     await this.testMcpServerContainer.stop()
     this.testMcpServerContainer = undefined
@@ -2451,6 +2513,198 @@ Then(
     )
   }
 )
+
+const _AUTH_CLIENT_CREDENTIALS: Record<string, AuthClientCredentials> = {
+  'shared-secret': {
+    sharedSecretAuth: {
+      secret: 'feature-shared-secret-1',
+      serviceName: 'worker',
+    },
+  },
+  'api-key': {
+    apiKeyAuth: {
+      key: 'api-key-valid-1',
+    },
+  },
+}
+
+const _setupAuthClientAndServer = async (
+  world: _World,
+  contextKey: string,
+  credentialsKey?: string
+) => {
+  const createContext = _CONTEXT[contextKey]
+  if (!createContext) {
+    throw new Error(`Unknown context key "${contextKey}"`)
+  }
+  world.context = await createContext()
+  const expressApp = world.context.config[CoreNamespace.root].domains.find(
+    (x: any) => x.name === '@node-in-layers/rest-api/express'
+  )
+  if (!expressApp?.mockExpress || !expressApp?.expressApp) {
+    throw new Error('Express mock app not found in system config')
+  }
+  const expressContext: any = {
+    ...world.context,
+    '@node-in-layers/rest-api/express': expressApp.mockExpress,
+  }
+  createExpressAuth(expressContext)
+
+  const server = await new Promise<http.Server>(resolve => {
+    const s = expressApp.expressApp.listen(0, '127.0.0.1', () => resolve(s))
+  })
+  world.authClientServer = server
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    throw new Error('Failed to bind auth-client test server')
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`
+  const credentials = credentialsKey
+    ? _AUTH_CLIENT_CREDENTIALS[credentialsKey]
+    : undefined
+
+  const clientSystem = await loadSystem({
+    environment: 'cucumber-test',
+    config: {
+      systemName: '@node-in-layers/auth/client-features-test',
+      environment: 'cucumber-test',
+      [CoreNamespace.root]: {
+        domains: [authClientDomain as any],
+        layerOrder: ['services', 'features'],
+        logging: {
+          logFormat: LogFormat.json,
+          logLevel: LogLevelNames.silent,
+        },
+      },
+      [AuthNamespace.Client]: {
+        baseUrl,
+        ...(credentials ? { credentials } : {}),
+      },
+    } as any,
+  })
+  world.authClientSystem = clientSystem
+  world.authClientFeatures = clientSystem.features[AuthNamespace.Client]
+}
+
+Given(
+  'we use an auth-client connected to {string} server',
+  async function (this: _World, contextKey: string) {
+    await _setupAuthClientAndServer(this, contextKey)
+  }
+)
+
+Given(
+  'we use an auth-client connected to {string} server with configured {string} credentials',
+  async function (this: _World, contextKey: string, credentialsKey: string) {
+    await _setupAuthClientAndServer(this, contextKey, credentialsKey)
+  }
+)
+
+When(
+  'we auth-client login with email {string} and password {string}',
+  async function (this: _World, email: string, password: string) {
+    this.result = await this.authClientFeatures.login({
+      basicAuth: {
+        identifier: email,
+        password,
+      },
+    })
+    this.authClientLastToken = this.result?.token
+  }
+)
+
+When('we auth-client login with empty props', async function (this: _World) {
+  this.result = await this.authClientFeatures.login({})
+  this.authClientLastToken = this.result?.token
+})
+
+When('we call auth-client getAuth', async function (this: _World) {
+  this.result = await this.authClientFeatures.getAuth()
+})
+
+When('we auth-client refresh the token', async function (this: _World) {
+  this.result = await this.authClientFeatures.refresh({})
+})
+
+When('we auth-client logout', async function (this: _World) {
+  this.result = await this.authClientFeatures.logout({})
+})
+
+Then(
+  'auth-client login result should include user email {string} and token',
+  function (this: _World, expectedEmail: string) {
+    _assert(
+      typeof this.result?.token === 'string' && this.result.token.length > 0,
+      'expected login token'
+    )
+    _assert(
+      this.result?.user?.email === expectedEmail,
+      `expected user email "${expectedEmail}", got "${this.result?.user?.email}"`
+    )
+  }
+)
+
+Then(
+  'auth-client getAuth result should match the logged in token',
+  function (this: _World) {
+    _assert(
+      this.result?.key === this.authClientLastToken,
+      `expected getAuth key "${this.authClientLastToken}", got "${this.result?.key}"`
+    )
+    _assert(
+      this.result?.header === 'Authorization',
+      `expected Authorization header, got "${this.result?.header}"`
+    )
+  }
+)
+
+Then(
+  'auth-client getAuth result should include a bearer token',
+  function (this: _World) {
+    _assert(
+      typeof this.result?.key === 'string' && this.result.key.length > 0,
+      'expected getAuth key'
+    )
+    _assert(
+      this.result?.header === 'Authorization',
+      `expected Authorization header, got "${this.result?.header}"`
+    )
+  }
+)
+
+Then(
+  'auth-client state should contain user email {string}',
+  async function (this: _World, expectedEmail: string) {
+    const state = await this.authClientFeatures.getState()
+    _assert(
+      state?.user?.email === expectedEmail,
+      `expected state user email "${expectedEmail}", got "${state?.user?.email}"`
+    )
+  }
+)
+
+Then(
+  'auth-client refresh should return a new token and update getAuth',
+  async function (this: _World) {
+    _assert(
+      typeof this.result?.token === 'string' && this.result.token.length > 0,
+      'expected refreshed token'
+    )
+    const auth = await this.authClientFeatures.getAuth()
+    _assert(
+      auth?.key === this.result.token,
+      `expected getAuth key to match refreshed token "${this.result.token}", got "${auth?.key}"`
+    )
+  }
+)
+
+Then('auth-client state should be empty', async function (this: _World) {
+  const state = await this.authClientFeatures.getState()
+  _assert(
+    state === undefined,
+    `expected undefined state, got ${JSON.stringify(state)}`
+  )
+})
 
 AfterAll(async function () {
   if (_oidcProvider) {

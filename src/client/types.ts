@@ -25,7 +25,9 @@ export type ClientAuthState = Readonly<{
 }>
 
 export type ClientLoginRequest = z.infer<typeof DefaultLoginRequestSchema>
-export type ClientLoginProps = ClientLoginRequest
+export type ClientLoginProps =
+  | ClientLoginRequest
+  | Readonly<Record<string, never>>
 
 export type ClientRefreshRequest = Readonly<{
   refreshToken?: string
@@ -36,14 +38,14 @@ export type ClientRefreshProps = ClientRefreshRequest
 export type ClientLoginResult = Readonly<{
   user: User
   token: string
-  refreshToken: string
+  refreshToken?: string
   loginApproach: string
 }>
 
 export const ClientLoginResultSchema = z.object({
   user: UserSchema,
   token: z.string(),
-  refreshToken: z.string(),
+  refreshToken: z.string().optional(),
   loginApproach: z.string(),
 })
 
@@ -53,8 +55,10 @@ export type ClientRefreshResult = Readonly<{
   refreshToken: string
 }>
 
-export const ClientLoginPropsSchema =
-  DefaultLoginRequestSchema as z.ZodType<ClientLoginProps>
+export const ClientLoginPropsSchema = z.union([
+  DefaultLoginRequestSchema,
+  z.object({}).strict(),
+]) as z.ZodType<ClientLoginProps>
 
 export const ClientRefreshPropsSchema = z.object({
   refreshToken: z.string().optional(),
@@ -123,6 +127,7 @@ export type ClientFeatures = Readonly<{
   login: NilAnnotatedFunction<ClientLoginProps, ClientLoginResult>
   refresh: NilAnnotatedFunction<ClientRefreshProps, ClientRefreshResult>
   logout: NilAnnotatedFunction<JsonObj, ClientLogoutResult>
+  getAuth: LayerFunction<() => Promise<ClientAuthResult | undefined>>
   getState: LayerFunction<() => Promise<ClientAuthState | undefined>>
   setState: LayerFunction<(state?: ClientAuthState) => Promise<void>>
 }>

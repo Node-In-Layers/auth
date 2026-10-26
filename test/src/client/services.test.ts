@@ -222,5 +222,94 @@ describe('/src/client/services.ts', () => {
       assert.equal(post.callCount, 1)
       assert.equal(post.firstCall.args[0], 'https://oauth.example/token')
     })
+
+    it('should login({}) using configured credentials.sharedSecretAuth', async () => {
+      const post = sinon.stub().resolves({
+        data: {
+          token: 'shared-token',
+          refreshToken: 'shared-refresh',
+          loginApproach: 'sharedSecret',
+          user: {
+            id: 'service-u1',
+            email: 'worker@example.com',
+            firstName: 'Worker',
+            lastName: 'Service',
+            enabled: true,
+          },
+        },
+      })
+      const context = {
+        config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+            credentials: {
+              sharedSecretAuth: {
+                secret: 'top-secret',
+                serviceName: 'worker',
+              },
+            },
+          },
+        },
+      } as ServicesContext
+      sinon.stub(axios, 'create').returns({
+        post,
+      } as unknown as AxiosInstance)
+      const services = create(context)
+
+      const loginResult = await services.login({})
+      const auth = await services.getAuth()
+
+      assert.equal(loginResult.token, 'shared-token')
+      assert.equal(loginResult.user.id, 'service-u1')
+      assert.equal(auth?.key, 'shared-token')
+      assert.equal(post.callCount, 1)
+      assert.deepEqual(post.firstCall.args[1], {
+        sharedSecretAuth: {
+          secret: 'top-secret',
+          serviceName: 'worker',
+        },
+      })
+    })
+
+    it('should login({}) using configured credentials.oauth clientCredentials and return uniform user', async () => {
+      const post = sinon.stub().resolves({
+        data: {
+          access_token: 'oauth-token',
+          expires_in: 300,
+        },
+      })
+      const context = {
+        config: {
+          [AuthNamespace.Client]: {
+            baseUrl: 'https://api.example.com',
+            credentials: {
+              oauth: {
+                tokenEndpoint: 'https://oauth.example/token',
+                clientId: 'oauth-worker',
+                clientSecret: 'oauth-secret',
+                scopes: ['read:all'],
+                clientCredentials: {
+                  enabled: true,
+                },
+              },
+            },
+          },
+        },
+      } as ServicesContext
+      sinon.stub(axios, 'create').returns({
+        post,
+      } as unknown as AxiosInstance)
+      const services = create(context)
+
+      const loginResult = await services.login({})
+      const auth = await services.getAuth()
+
+      assert.equal(loginResult.token, 'oauth-token')
+      assert.equal(loginResult.loginApproach, 'oauth2')
+      assert.equal(loginResult.user.id, 'oauth-worker')
+      assert.isUndefined(loginResult.refreshToken)
+      assert.equal(auth?.key, 'oauth-token')
+      assert.equal(post.callCount, 1)
+    })
   })
 })

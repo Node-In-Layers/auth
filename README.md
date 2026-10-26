@@ -322,9 +322,11 @@ because it identifies the API where `/login` and `/token/refresh` are hosted:
 ```typescript
 [AuthNamespace.Client]: {
   baseUrl: 'https://private-api.example.com',
-  sharedSecretAuth: {
-    secret: process.env.PRIVATE_API_SECRET!,
-    serviceName: 'publicApi',
+  credentials: {
+    sharedSecretAuth: {
+      secret: process.env.PRIVATE_API_SECRET!,
+      serviceName: 'publicApi',
+    },
   },
 }
 ```

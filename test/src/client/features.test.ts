@@ -30,12 +30,16 @@ describe('/src/client/features.ts', () => {
         },
       })
       const logout = sinon.stub().resolves({ loggedOut: true })
+      const getAuth = sinon
+        .stub()
+        .resolves({ key: 't1', header: 'Authorization' })
       const features = create({
         services: {
           [AuthNamespace.Client]: {
             login,
             refresh,
             logout,
+            getAuth,
           },
         },
       } as any)
@@ -47,12 +51,15 @@ describe('/src/client/features.ts', () => {
         },
       })
       const refreshActual = await features.refresh({})
+      const authActual = await features.getAuth()
       await features.logout({})
 
       assert.equal(loginActual.token, 't1')
       assert.equal(refreshActual.token, 't2')
+      assert.equal(authActual?.key, 't1')
       assert.equal(login.callCount, 1)
       assert.equal(refresh.callCount, 1)
+      assert.equal(getAuth.callCount, 1)
       assert.equal(logout.callCount, 1)
     })
   })
