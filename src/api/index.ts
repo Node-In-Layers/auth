@@ -3,6 +3,7 @@ import { AuthNamespace } from '../types.js'
 const name = AuthNamespace.Api
 
 export * as mcp from './mcp.js'
+export * as express from './express.js'
 export * as services from './services.js'
 export * as features from './features.js'
 export { authModelCrudsOverrides } from './services.js'
