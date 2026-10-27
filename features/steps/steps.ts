@@ -750,6 +750,7 @@ const _createSystem = async (
     name: api.name,
     services: api.services,
     features: api.features,
+    ...(transport === 'mcp' ? { mcp: api.mcp } : { express: api.express }),
   }
   const config: AuthConfig = merge(
     {
@@ -1831,12 +1832,7 @@ Given(
       throw new Error('Express mock app not found in system config')
     }
 
-    const expressContext: any = {
-      ...this.context,
-      '@node-in-layers/rest-api/express': expressApp.mockExpress,
-    }
-
-    const expressApi = createExpressAuth(expressContext)
+    const expressApi = this.context.express[AuthNamespace.Api]
     expressApi.addUnprotectedRoute('/health', 'GET', async (_req, res) => {
       res.json({ ok: 'health' })
     })
@@ -1899,12 +1895,7 @@ Given(
       throw new Error('MCP mock app not found in system config')
     }
 
-    const mcpContext: any = {
-      ...this.context,
-      '@node-in-layers/mcp-server': mcpApp.mockMcp,
-    }
-
-    const mcpApi = createMcpAuth(mcpContext)
+    const mcpApi = this.context.mcp[AuthNamespace.Api]
     mcpApi.addUnprotectedRoute('/health', 'GET', async (_req, res) => {
       res.json({ ok: 'health' })
     })
@@ -2544,11 +2535,6 @@ const _setupAuthClientAndServer = async (
   if (!expressApp?.mockExpress || !expressApp?.expressApp) {
     throw new Error('Express mock app not found in system config')
   }
-  const expressContext: any = {
-    ...world.context,
-    '@node-in-layers/rest-api/express': expressApp.mockExpress,
-  }
-  createExpressAuth(expressContext)
 
   const server = await new Promise<http.Server>(resolve => {
     const s = expressApp.expressApp.listen(0, '127.0.0.1', () => resolve(s))

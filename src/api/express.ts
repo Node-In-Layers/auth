@@ -27,11 +27,15 @@ type _ExpressContext = FeaturesContext<
   object,
   ApiFeaturesLayer,
   Readonly<Record<string, unknown>>
->
+> & {
+  express: {
+    [EXPRESS_NAMESPACE]: ApiExpressHost
+  }
+}
 
 export const create = (context: _ExpressContext): ApiExpress => {
   const apiConfig = context.config[AuthNamespace.Api] as ApiConfig | undefined
-  const host = context[EXPRESS_NAMESPACE] as ApiExpressHost
+  const host = context.express[EXPRESS_NAMESPACE]
   const protectedRoutes: ApiProtectedRouteRegistration[] = []
   const unprotectedRoutes: { path: string; method: string }[] = []
 
